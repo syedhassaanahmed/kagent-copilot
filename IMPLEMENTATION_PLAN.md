@@ -197,7 +197,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    with `extraPortMappings` exposing the kagent A2A NodePort to the host. Skip if the
    cluster already exists. *Verify:* `kubectl get nodes` Ready; re-run is a no-op.
 
-6. [ ] **llm-config** — `35-llm-config.sh`: resolve the **provider-agnostic** LLM
+6. [x] **llm-config** — `35-llm-config.sh`: resolve the **provider-agnostic** LLM
    config from `.env` (`LLM_PROVIDER`, `LLM_MODEL`, `LLM_ENDPOINT`, `LLM_API_KEY`),
    no CoreDNS. For `ollama`: if `LLM_ENDPOINT` unset, auto-derive a **platform-aware
    candidate set** (Linux/WSL2: Kind docker-network gateway IP via `docker network
