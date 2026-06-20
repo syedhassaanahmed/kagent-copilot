@@ -1,5 +1,16 @@
 # Implementation Plan: n8n ⇄ kagent A2A Demo
 
+> **WSL2 networking follow-up (validated):** On Docker Desktop + WSL2 (default
+> IPv4-only NAT), IPv4-only Kind pods cannot reach the stock **dual-stack**
+> Ollama (`[::]:11434`) — the WSL2 NAT-mode mirror only forwards IPv4 sockets
+> (confirmed: every host IP returns HTTP 000 from a pod; an IPv4-bound listener
+> returns 200). Per user constraint (do **not** modify the systemd Ollama), the
+> recommended fix is **WSL mirrored networking** (`networkingMode=mirrored` in
+> `%UserProfile%\.wslconfig` + `wsl --shutdown`), which leaves Ollama stock.
+> Scripts/docs reflect this; `35-llm-config.sh` pod-probe is the hard gate.
+> **Pending user action:** enable mirrored networking, then `make up` to validate
+> the end-to-end A2A round-trip. (commit `90db268`)
+
 ## Problem Statement
 
 Demonstrate that an **n8n agent workflow** can communicate with a **kagent-based
