@@ -246,7 +246,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
     activate idempotently. *Verify:* opening n8n shows the workflow laid out on the
     canvas; it runs from the editor's "Execute Workflow" button.
 
-12. [ ] **demo-run** — `90-demo-run.sh`: headless replay path — trigger the workflow
+12. [x] **demo-run** — `90-demo-run.sh`: headless replay path — trigger the workflow
     (CLI/webhook), capture and pretty-print the A2A response proving n8n↔kagent
     communication. *Verify:* script prints a model-generated answer from the kagent agent.
 
