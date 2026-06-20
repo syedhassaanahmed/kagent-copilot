@@ -61,14 +61,18 @@ run_sudo() {
 systemd_ollama() { systemctl list-unit-files 2>/dev/null | grep -qE '^ollama\.service'; }
 
 # apply_ipv4_dropin — set OLLAMA_HOST=127.0.0.1:$PORT on the systemd Ollama via a
-# drop-in and restart it. Returns 0 only if an IPv4 listener results.
+# drop-in and restart it. The drop-in is named to sort LAST (systemd merges *.d
+# files alphabetically, last assignment of a variable wins) so it overrides any
+# pre-existing override.conf that sets OLLAMA_HOST=0.0.0.0. Returns 0 only if an
+# IPv4 listener results.
 apply_ipv4_dropin() {
   local dropdir=/etc/systemd/system/ollama.service.d
   ( sudo -n true 2>/dev/null || [ -t 0 ] || [ -t 1 ] ) || return 1
   log "applying systemd drop-in OLLAMA_HOST=127.0.0.1:${PORT} (sudo may prompt)..."
   run_sudo mkdir -p "$dropdir" || return 1
+  run_sudo rm -f "$dropdir/ipv4.conf" 2>/dev/null || true   # remove stale early-sorting drop-in
   printf '[Service]\nEnvironment="OLLAMA_HOST=127.0.0.1:%s"\n' "$PORT" \
-    | run_sudo tee "$dropdir/ipv4.conf" >/dev/null || return 1
+    | run_sudo tee "$dropdir/zz-ipv4.conf" >/dev/null || return 1
   run_sudo systemctl daemon-reload || return 1
   run_sudo systemctl restart ollama || return 1
   sleep 3
@@ -80,13 +84,17 @@ instruct_ipv4_and_die() {
   die "Ollama on :${PORT} is bound dual-stack/IPv6 ('*:${PORT}') — IPv4-only Kind
   pods cannot reach it through the WSL2 NAT-mode mirror.
 
-  Apply the IPv4 bind once (keeps the default port ${PORT}), then re-run 'make up':
+  Apply the IPv4 bind once (keeps the default port ${PORT}), then re-run 'make up'.
+  Note: the drop-in is named 'zz-ipv4.conf' so it overrides any existing
+  override.conf (systemd merges *.d files alphabetically; last wins):
 
+    sudo rm -f ${dropdir}/ipv4.conf; \\
     sudo mkdir -p ${dropdir} && \\
     printf '[Service]\\nEnvironment=\"OLLAMA_HOST=127.0.0.1:${PORT}\"\\n' \\
-      | sudo tee ${dropdir}/ipv4.conf && \\
+      | sudo tee ${dropdir}/zz-ipv4.conf && \\
     sudo systemctl daemon-reload && sudo systemctl restart ollama
 
+  Verify with: ss -ltn | grep ${PORT}   (expect 127.0.0.1:${PORT}, not *:${PORT})
   (No-Ollama-change alternative: WSL mirrored networking — see docs/troubleshooting.md.)"
 }
 

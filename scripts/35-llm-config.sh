@@ -123,10 +123,13 @@ resolve_ollama() {
   cannot reach.
 
   Fix (keeps the default port ${PORT}): bind Ollama to IPv4 via a systemd drop-in,
-  then re-run 'make up' (this is what 'make ollama' applies automatically):
+  then re-run 'make up' (this is what 'make ollama' applies automatically). The
+  drop-in is named 'zz-ipv4.conf' so it overrides any existing override.conf
+  (systemd merges *.d files alphabetically; the last assignment wins):
+      sudo rm -f /etc/systemd/system/ollama.service.d/ipv4.conf; \\
       sudo mkdir -p /etc/systemd/system/ollama.service.d && \\
       printf '[Service]\\nEnvironment=\"OLLAMA_HOST=127.0.0.1:${PORT}\"\\n' \\
-        | sudo tee /etc/systemd/system/ollama.service.d/ipv4.conf && \\
+        | sudo tee /etc/systemd/system/ollama.service.d/zz-ipv4.conf && \\
       sudo systemctl daemon-reload && sudo systemctl restart ollama
 
   Notes: OLLAMA_HOST=0.0.0.0 is NOT enough (Ollama still binds dual-stack); the

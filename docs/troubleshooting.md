@@ -63,11 +63,19 @@ drop-in once (this is exactly what `make ollama` / `make up` applies automatical
 prompting for `sudo` when needed):
 
 ```bash
+sudo rm -f /etc/systemd/system/ollama.service.d/ipv4.conf
 sudo mkdir -p /etc/systemd/system/ollama.service.d && \
 printf '[Service]\nEnvironment="OLLAMA_HOST=127.0.0.1:11434"\n' \
-  | sudo tee /etc/systemd/system/ollama.service.d/ipv4.conf && \
+  | sudo tee /etc/systemd/system/ollama.service.d/zz-ipv4.conf && \
 sudo systemctl daemon-reload && sudo systemctl restart ollama
 ```
+
+> **Drop-in ordering gotcha:** the stock installer (or a prior `systemctl edit
+> ollama`) often leaves an `override.conf` with `OLLAMA_HOST=0.0.0.0:11434`. systemd
+> merges `*.service.d/*.conf` **alphabetically** and the *last* assignment of a
+> variable wins, so a drop-in named `ipv4.conf` would be overridden by
+> `override.conf`. Name it `zz-ipv4.conf` (sorts last) so the IPv4 bind reliably
+> wins. Confirm with `systemctl show ollama -p Environment | tr ' ' '\n' | grep OLLAMA_HOST`.
 
 Afterwards `ss -ltn | grep 11434` should show `127.0.0.1:11434` (not `*:11434`).
 `127.0.0.1` is sufficient — only the WSL2 mirror (and through it the pods) needs to
