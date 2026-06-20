@@ -1,16 +1,16 @@
 # Implementation Plan: n8n ⇄ kagent A2A Demo
 
-> **WSL2 networking follow-up (validated):** On Docker Desktop + WSL2 (default
-> IPv4-only NAT), IPv4-only Kind pods cannot reach the stock **dual-stack**
-> Ollama (`[::]:11434`) — the WSL2 NAT-mode mirror only forwards IPv4 sockets
-> (confirmed: every host IP returns HTTP 000 from a pod; an IPv4-bound listener
-> returns 200). **Chosen fix (user-approved):** bind Ollama to IPv4 via a systemd
-> drop-in `OLLAMA_HOST=127.0.0.1:11434`, keeping the default port. `20-ollama-up.sh`
-> applies this automatically (prompting for `sudo`) and `35-llm-config.sh` pod-probe
-> is the hard gate. No-Ollama-change alternative documented: WSL mirrored networking.
-> **Pending user action:** run `make up` (or the one-time drop-in command) so sudo
-> can apply the drop-in, then the end-to-end A2A round-trip validates. Applying a
-> system-level drop-in needs the user's sudo password (no passwordless sudo).
+> **WSL2 networking follow-up (RESOLVED & validated):** On Docker Desktop + WSL2
+> (default IPv4-only NAT), IPv4-only Kind pods cannot reach a stock **dual-stack**
+> Ollama (`[::]:11434`) — the WSL2 NAT-mode mirror only forwards IPv4 sockets.
+> **Fix applied:** bind Ollama to IPv4 via a systemd drop-in
+> `OLLAMA_HOST=127.0.0.1:11434`, named `zz-ipv4.conf` so it overrides the stock
+> `override.conf` (systemd merges *.d alphabetically; last wins). `20-ollama-up.sh`
+> applies/verifies this automatically (sudo prompt) and is idempotent.
+> **Verified end-to-end:** `ss` shows `127.0.0.1:11434`; pod→`192.168.65.254:11434`
+> HTTP 200; `make up` idempotent (no sudo prompt once bound); `make demo` A2A
+> round-trip returns `state: completed` with the agent's prose reply. No-Ollama-change
+> alternative (WSL mirrored networking) documented. (commits `90db268`→`9cab87e`)
 
 ## Problem Statement
 
