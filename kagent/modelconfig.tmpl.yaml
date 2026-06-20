@@ -1,0 +1,55 @@
+# ===========================================================================
+# kagent/modelconfig.tmpl.yaml — REFERENCE template.
+#
+# The actual ModelConfig is rendered from .env and applied by
+# scripts/50-kagent-agent-apply.sh (this file documents the three shapes).
+# kagent ModelConfig API: kagent.dev/v1alpha2.
+#
+# Placeholders: ${MODELCONFIG_NAME} ${KAGENT_NAMESPACE} ${LLM_MODEL}
+#               ${LLM_ENDPOINT} (scheme stripped for ollama.host)
+#               ${LLM_SECRET_NAME} ${LLM_SECRET_KEY}
+# ===========================================================================
+
+# --- provider: ollama (default) -------------------------------------------
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: ${MODELCONFIG_NAME}
+  namespace: ${KAGENT_NAMESPACE}
+spec:
+  provider: Ollama
+  model: ${LLM_MODEL}            # e.g. llama3.2:1b
+  ollama:
+    host: ${LLM_ENDPOINT}        # host:port, e.g. 192.168.65.254:11434
+    options:
+      num_ctx: "8192"
+---
+# --- provider: openai (any OpenAI-compatible endpoint, e.g. MS/Azure Foundry)
+# apiVersion: kagent.dev/v1alpha2
+# kind: ModelConfig
+# metadata:
+#   name: ${MODELCONFIG_NAME}
+#   namespace: ${KAGENT_NAMESPACE}
+# spec:
+#   provider: OpenAI
+#   model: ${LLM_MODEL}          # e.g. gpt-4o-mini
+#   apiKeySecret: ${LLM_SECRET_NAME}
+#   apiKeySecretKey: ${LLM_SECRET_KEY}
+#   openAI:
+#     baseUrl: ${LLM_ENDPOINT}   # e.g. https://api.openai.com/v1
+---
+# --- provider: azureOpenAI -------------------------------------------------
+# apiVersion: kagent.dev/v1alpha2
+# kind: ModelConfig
+# metadata:
+#   name: ${MODELCONFIG_NAME}
+#   namespace: ${KAGENT_NAMESPACE}
+# spec:
+#   provider: AzureOpenAI
+#   model: ${LLM_MODEL}          # deployment name
+#   apiKeySecret: ${LLM_SECRET_NAME}
+#   apiKeySecretKey: ${LLM_SECRET_KEY}
+#   azureOpenAI:
+#     azureEndpoint: ${LLM_ENDPOINT}
+#     azureDeployment: ${LLM_MODEL}
+#     apiVersion: "2024-10-21"

@@ -1,0 +1,41 @@
+# ===========================================================================
+# kagent/agent.yaml — REFERENCE manifest for the A2A demo Agent.
+#
+# The script scripts/50-kagent-agent-apply.sh applies this with metadata.name /
+# namespace and spec.declarative.modelConfig substituted from .env
+# (AGENT_NAME, AGENT_NAMESPACE, MODELCONFIG_NAME).
+#
+# A deliberately tool-less, conversational agent: it just answers over A2A,
+# which is the most reliable way to prove n8n <-> kagent A2A communication with
+# a tiny local model. Swap in a richer LLM via .env to add tool use later.
+# ===========================================================================
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: ${AGENT_NAME}
+  namespace: ${AGENT_NAMESPACE}
+spec:
+  declarative:
+    runtime: python
+    modelConfig: ${MODELCONFIG_NAME}
+    systemMessage: |
+      You are "A2A Demo Agent", a friendly assistant reachable over the A2A
+      (Agent-to-Agent) protocol from an n8n workflow.
+
+      Keep replies short, warm and clear (1-3 sentences). When greeted, greet
+      back and briefly state that you are a kagent agent answering over A2A. If
+      asked who or what you are, explain you are a kagent-hosted demo agent that
+      an n8n workflow reached over the A2A protocol.
+    a2aConfig:
+      skills:
+        - id: a2a-greeting
+          name: Greeting & Q&A
+          description: Greets callers and answers short questions over A2A.
+          examples:
+            - Say hello.
+            - Who are you?
+            - What protocol are we talking over?
+          tags:
+            - demo
+            - greeting
+            - a2a

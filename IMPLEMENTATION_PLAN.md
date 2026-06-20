@@ -216,7 +216,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    `ModelConfig` in the next task. Wait for controller/UI rollout. *Verify:* pods
    Ready; A2A NodePort reachable from the host; re-run upgrades idempotently.
 
-8. [ ] **kagent-agent** — `50-kagent-agent-apply.sh` + `kagent/modelconfig.tmpl.yaml`
+8. [x] **kagent-agent** — `50-kagent-agent-apply.sh` + `kagent/modelconfig.tmpl.yaml`
    + `kagent/agent.yaml`: render a **provider-agnostic `ModelConfig`** from `.env`
    (`provider`/`model` + `ollama.host` **or** `openAI.baseUrl` **or** `azureOpenAI.*`),
    create the API-key `Secret` when `LLM_API_KEY` is set, then apply the `Agent` CR
