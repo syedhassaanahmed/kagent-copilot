@@ -1,0 +1,33 @@
+# Local environment / secrets (never commit real values; commit .env.example instead)
+.env
+.env.local
+*.env
+!.env.example
+
+# Secrets / credentials
+*.key
+*.pem
+*-secret.yaml
+secrets/
+
+# Generated / rendered manifests
+*.gen.yaml
+*.rendered.yaml
+kagent/modelconfig.yaml
+
+# n8n local data (Docker Compose volume)
+n8n/.n8n/
+n8n/data/
+
+# Tool / build caches and logs
+.tmp/
+tmp/
+*.log
+*.tgz
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
