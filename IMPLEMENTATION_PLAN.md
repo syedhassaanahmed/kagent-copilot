@@ -230,7 +230,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    (no version header → legacy v0) returns a response. *Verify:* a manual `curl`
    round-trip returns an agent answer.
 
-10. [ ] **n8n-up** — `60-n8n-up.sh` + `n8n/docker-compose.yaml`: bring up n8n (pinned
+10. [x] **n8n-up** — `60-n8n-up.sh` + `n8n/docker-compose.yaml`: bring up n8n (pinned
    ≥1.60.0) with the `@agentic-layer/n8n-nodes-a2a` community node installed and
    `extra_hosts: ["host.docker.internal:host-gateway"]` so it can reach the
    Kind-published A2A NodePort on the WSL host. *Verify:* n8n UI loads; A2A node
