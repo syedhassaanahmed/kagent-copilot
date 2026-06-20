@@ -266,7 +266,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
 15. [x] **teardown** — `99-teardown.sh`: delete Kind cluster, stop Compose, optionally
     stop Ollama / remove model. Idempotent. *Verify:* re-run cleanly with nothing left.
 
-16. [ ] **docs** — `README.md` (prereqs, quickstart, the Make commands, architecture
+16. [x] **docs** — `README.md` (prereqs, quickstart, the Make commands, architecture
    diagram, and a **"Live demo walkthrough"** section with the UI steps and what to
    point at) + `docs/troubleshooting.md` (**per-OS** networking between
    Compose↔Kind↔host LLM on Linux/WSL2/macOS, small-model tool-calling caveats).
