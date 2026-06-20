@@ -60,9 +60,9 @@ a `.env` change plus a re-apply (`make kagent-agent`), with **no code changes**:
 
 ## Architecture
 
-n8n (A2A client, in Docker Compose) sends JSON-RPC `message/send` to the kagent
-controller (A2A server, in a Kind cluster). The controller routes to the `Agent` CR,
-which calls the LLM selected by its `ModelConfig` CR. The response flows back to n8n.
+n8n sends a message to the kagent agent over the A2A protocol and gets the agent's
+reply back. The agent runs the actual LLM call; n8n just makes the request and shows
+the response.
 
 ```
 ┌──────────────┐      A2A protocol       ┌──────────────┐      asks      ┌──────────────┐
