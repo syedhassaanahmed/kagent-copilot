@@ -16,11 +16,11 @@ OpenAI-compatible endpoint by config only.
 - `make`, `bash`, `curl`. Remaining tools (`kubectl`, `kind`, `helm`, `ollama`) are
   installed idempotently by `make tools`.
 
-> **WSL2 + Docker Desktop users:** the IPv4-only Kind pods cannot reach a stock
-> dual-stack Ollama through WSL2's default NAT-mode mirror. Leave Ollama as-is and
-> enable **WSL mirrored networking** (`networkingMode=mirrored` in `%UserProfile%\.wslconfig`,
-> then `wsl --shutdown`). `make up` verifies pod→host reachability and tells you if
-> this is needed. See
+> **WSL2 + Docker Desktop users:** the IPv4-only Kind pods can't reach a stock
+> dual-stack Ollama through WSL2's default NAT-mode mirror. `make up` fixes this by
+> binding Ollama to IPv4 (`OLLAMA_HOST=127.0.0.1:11434` via a systemd drop-in,
+> prompting for `sudo` once). A no-Ollama-change alternative is WSL mirrored
+> networking. See
 > [docs/troubleshooting.md](docs/troubleshooting.md#-docker-desktop--wsl2-gotcha-important-stock-ollama-is-dual-stack).
 
 ## Quickstart

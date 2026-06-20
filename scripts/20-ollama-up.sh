@@ -5,20 +5,17 @@
 #
 # Idempotent:
 #   - reuses an already-running server if one answers on $OLLAMA_PORT
-#   - otherwise starts one bound to 0.0.0.0:$OLLAMA_PORT (pid in .ollama.pid)
-#   - pulls LLM_MODEL only if it is not already present
+#   - otherwise starts one bound to 127.0.0.1:$OLLAMA_PORT (pid in .ollama.pid)
+#   - ensures an IPv4 listener (see below), pulling LLM_MODEL only if missing
 #
-# This script NEVER reconfigures a system-managed Ollama. It only detects whether
-# the host Ollama will be reachable from IPv4-only Kind pods and, if not, prints
-# guidance. The actual pod->host reachability is the hard gate in 35-llm-config.sh.
-#
-# Docker Desktop + WSL2 note:
-#   Kind pods are IPv4-only and reach the WSL host through the Windows loopback,
-#   which the WSL2 *NAT-mode* mirror forwards ONLY for IPv4 sockets. Stock Ollama
-#   binds dual-stack [::] (shown by `ss` as `*:11434`), which that mirror skips —
-#   so pods cannot reach it. The clean fix that leaves Ollama untouched is WSL
-#   *mirrored* networking (networkingMode=mirrored in .wslconfig + `wsl --shutdown`).
-#   See docs/troubleshooting.md.
+# Why IPv4 (Docker Desktop + WSL2):
+#   IPv4-only Kind pods reach the WSL host through the Windows loopback, which the
+#   WSL2 NAT-mode mirror forwards ONLY for IPv4 sockets. Stock Ollama binds
+#   dual-stack [::] (shown by `ss` as `*:11434`) even with OLLAMA_HOST=0.0.0.0,
+#   which that mirror skips. Binding 127.0.0.1 yields a true IPv4 socket the mirror
+#   forwards. For a systemd-managed Ollama this is applied via a drop-in setting
+#   OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT (sudo may prompt). A no-Ollama-change
+#   alternative is WSL mirrored networking. See docs/troubleshooting.md.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -37,46 +34,80 @@ PIDFILE="$REPO_ROOT/.ollama.pid"
 
 api_up() { curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/tags" >/dev/null 2>&1; }
 
-# bind_addr — the listen address `ss`/`lsof` reports for $PORT (e.g. 0.0.0.0,
-# 127.0.0.1, * for dual-stack, [::]). Empty if it can't be determined.
-bind_addr() {
+# has_ipv4_listener — true only for an explicit IPv4 listener (0.0.0.0 / 127.0.0.1)
+# on $PORT. Dual-stack/IPv6 (* / [::]) does NOT count.
+has_ipv4_listener() {
   if have_cmd ss; then
-    ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ":${PORT}$" | sed -E "s/:${PORT}$//" | head -1
+    ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "^(0\.0\.0\.0|127\.0\.0\.1):${PORT}$"
   elif have_cmd lsof; then
-    lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $9}' | sed -E "s/:${PORT}$//" | head -1
+    lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | grep -qE '(0\.0\.0\.0|127\.0\.0\.1):'"${PORT}"
+  else
+    return 0   # can't tell; assume ok
   fi
 }
 
-# is_ipv4_bind — true only for an explicit IPv4 listener (0.0.0.0 / 127.0.0.1).
-# Dual-stack/IPv6 (* / [::]) is NOT counted: the WSL2 NAT-mode mirror skips it,
-# so IPv4-only Kind pods can't reach it (unless WSL mirrored networking is on,
-# which 35-llm-config.sh verifies directly from a pod).
-is_ipv4_bind() {
-  case "$(bind_addr)" in
-    0.0.0.0|127.0.0.1) return 0 ;;
-    *) return 1 ;;
-  esac
+# run_sudo — run a privileged command, preferring non-interactive sudo, falling
+# back to an interactive prompt when attached to a TTY (e.g. user runs `make up`).
+run_sudo() {
+  if sudo -n true 2>/dev/null; then
+    sudo -n "$@"
+  elif [ -t 0 ] || [ -t 1 ]; then
+    sudo "$@"
+  else
+    return 1
+  fi
+}
+
+systemd_ollama() { systemctl list-unit-files 2>/dev/null | grep -qE '^ollama\.service'; }
+
+# apply_ipv4_dropin — set OLLAMA_HOST=127.0.0.1:$PORT on the systemd Ollama via a
+# drop-in and restart it. Returns 0 only if an IPv4 listener results.
+apply_ipv4_dropin() {
+  local dropdir=/etc/systemd/system/ollama.service.d
+  ( sudo -n true 2>/dev/null || [ -t 0 ] || [ -t 1 ] ) || return 1
+  log "applying systemd drop-in OLLAMA_HOST=127.0.0.1:${PORT} (sudo may prompt)..."
+  run_sudo mkdir -p "$dropdir" || return 1
+  printf '[Service]\nEnvironment="OLLAMA_HOST=127.0.0.1:%s"\n' "$PORT" \
+    | run_sudo tee "$dropdir/ipv4.conf" >/dev/null || return 1
+  run_sudo systemctl daemon-reload || return 1
+  run_sudo systemctl restart ollama || return 1
+  sleep 3
+  has_ipv4_listener
+}
+
+instruct_ipv4_and_die() {
+  local dropdir=/etc/systemd/system/ollama.service.d
+  die "Ollama on :${PORT} is bound dual-stack/IPv6 ('*:${PORT}') — IPv4-only Kind
+  pods cannot reach it through the WSL2 NAT-mode mirror.
+
+  Apply the IPv4 bind once (keeps the default port ${PORT}), then re-run 'make up':
+
+    sudo mkdir -p ${dropdir} && \\
+    printf '[Service]\\nEnvironment=\"OLLAMA_HOST=127.0.0.1:${PORT}\"\\n' \\
+      | sudo tee ${dropdir}/ipv4.conf && \\
+    sudo systemctl daemon-reload && sudo systemctl restart ollama
+
+  (No-Ollama-change alternative: WSL mirrored networking — see docs/troubleshooting.md.)"
+}
+
+ensure_ipv4() {
+  has_ipv4_listener && { ok "Ollama has an IPv4 listener on :${PORT} (pod-reachable)"; return 0; }
+  warn "Ollama on :${PORT} is bound dual-stack/IPv6 — IPv4-only Kind pods cannot reach it."
+  if systemd_ollama; then
+    apply_ipv4_dropin && { ok "Ollama rebound to IPv4 127.0.0.1:${PORT}"; return 0; }
+  fi
+  instruct_ipv4_and_die
 }
 
 if api_up; then
   ok "reusing existing Ollama server on :${PORT}"
+  ensure_ipv4
 else
-  log "starting 'ollama serve' on 0.0.0.0:${PORT}..."
-  OLLAMA_HOST="0.0.0.0:${PORT}" nohup ollama serve >"$REPO_ROOT/.ollama.log" 2>&1 &
+  log "starting 'ollama serve' on 127.0.0.1:${PORT} (IPv4)..."
+  OLLAMA_HOST="127.0.0.1:${PORT}" nohup ollama serve >"$REPO_ROOT/.ollama.log" 2>&1 &
   echo $! > "$PIDFILE"
   wait_for "ollama API on :${PORT}" 60 bash -c "curl -fsS --max-time 3 http://127.0.0.1:${PORT}/api/tags >/dev/null"
-fi
-
-# Informational reachability hint (does NOT modify Ollama, does NOT fail here).
-if is_ipv4_bind; then
-  ok "Ollama has an IPv4 listener on :${PORT} (reachable from Kind pods)"
-else
-  warn "Ollama on :${PORT} is bound dual-stack/IPv6 ('$(bind_addr):${PORT}')."
-  warn "On Docker Desktop + WSL2 (NAT mode) IPv4-only Kind pods cannot reach it."
-  warn "Leave Ollama as-is and enable WSL mirrored networking instead:"
-  warn "  1. In Windows %UserProfile%\\.wslconfig add under [wsl2]: networkingMode=mirrored"
-  warn "  2. From Windows: wsl --shutdown   (then 'make up' again)"
-  warn "35-llm-config.sh will verify pod->host reachability directly. See docs/troubleshooting.md."
+  ensure_ipv4
 fi
 
 # --- model ----------------------------------------------------------------

@@ -28,7 +28,7 @@ the first reachable one to `LLM_ENDPOINT` in `.env`.
 | Platform | Pod → host LLM route |
 |----------|----------------------|
 | Linux (native Docker Engine) | Kind docker-network gateway IP (`docker network inspect kind`, e.g. `172.18.0.1`) |
-| WSL2 / macOS (Docker Desktop) | Windows/VM host gateway `host.docker.internal` → `192.168.65.254` (IPv4); on WSL2 the stock dual-stack Ollama needs **WSL mirrored networking** to be pod-reachable — see the gotcha below |
+| WSL2 / macOS (Docker Desktop) | Windows/VM host gateway `host.docker.internal` → `192.168.65.254` (IPv4); on WSL2 the stock dual-stack Ollama must be **bound to IPv4** (`OLLAMA_HOST=127.0.0.1`, applied by `make up`) — see the gotcha below |
 
 ### ⚠️ Docker Desktop + WSL2 gotcha (important): stock Ollama is dual-stack
 
@@ -56,11 +56,33 @@ works fine inside WSL.
 | `0.0.0.0` *as Ollama interprets it* | `*:port` (dual-stack) | ❌ unreachable |
 | `[::]:port` (IPv6) | `[::]:port` / `*:port` | ❌ unreachable |
 
-**Fix (recommended — leaves Ollama completely stock): WSL mirrored networking.**
-Instead of touching Ollama, switch WSL2 from its default NAT networking to
-**mirrored** mode, which shares the Windows network stack (localhost + IPv6) with
-your WSL distro, so the stock dual-stack Ollama becomes reachable via
-`host.docker.internal`:
+**Fix (recommended — keeps the default port 11434): bind Ollama to IPv4.**
+Force Ollama onto an explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434`, which
+the WSL2 NAT-mode mirror *does* forward. For the systemd-managed Ollama, apply a
+drop-in once (this is exactly what `make ollama` / `make up` applies automatically,
+prompting for `sudo` when needed):
+
+```bash
+sudo mkdir -p /etc/systemd/system/ollama.service.d && \
+printf '[Service]\nEnvironment="OLLAMA_HOST=127.0.0.1:11434"\n' \
+  | sudo tee /etc/systemd/system/ollama.service.d/ipv4.conf && \
+sudo systemctl daemon-reload && sudo systemctl restart ollama
+```
+
+Afterwards `ss -ltn | grep 11434` should show `127.0.0.1:11434` (not `*:11434`).
+`127.0.0.1` is sufficient — only the WSL2 mirror (and through it the pods) needs to
+reach Ollama; n8n talks to the kagent NodePort, never to Ollama directly.
+`scripts/35-llm-config.sh` then re-probes pod→host reachability and proceeds.
+
+**What does NOT help:** switching Docker Desktop to dual IPv4/IPv6 *alone* (the WSL2
+NAT-mode mirror still won't forward the IPv6/localhost hop into WSL); the Docker
+Desktop "*.docker.internal in /etc/hosts" setting; restarting/reinstalling Ollama;
+rebooting; or `OLLAMA_HOST=0.0.0.0` (Ollama still binds dual-stack `[::]`).
+
+**No-Ollama-change alternative: WSL mirrored networking.** Switch WSL2 from its
+default NAT networking to **mirrored** mode, which shares the Windows network stack
+(localhost + IPv6) with your WSL distro, so the stock dual-stack Ollama becomes
+reachable via `host.docker.internal`:
 
 ```ini
 # Windows: %UserProfile%\.wslconfig
@@ -70,17 +92,6 @@ networkingMode=mirrored
 
 Then from Windows run `wsl --shutdown`, restart, and `make up` again. Requires
 **Windows 11 22H2+ (build 22621.2359+)** and **Docker Desktop 4.19+**.
-`scripts/35-llm-config.sh` re-probes pod→host reachability and proceeds once it works.
-
-**What does NOT help:** switching Docker Desktop to dual IPv4/IPv6 *alone* (the WSL2
-NAT-mode mirror still won't forward the IPv6/localhost hop into WSL); the Docker
-Desktop "*.docker.internal in /etc/hosts" setting; restarting/reinstalling Ollama;
-rebooting; or `OLLAMA_HOST=0.0.0.0` (Ollama still binds dual-stack `[::]`).
-
-**Alternative (if you accept changing Ollama's listen address):** bind it to an
-explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434` (e.g. a systemd drop-in),
-which the WSL2 NAT-mode mirror *does* forward. This keeps the default port but
-modifies the Ollama service, so mirrored networking above is preferred.
 
 **Fix (model placement, already automated):** `35-llm-config.sh` resolves the endpoint
 that pods can reach, and `ensure_model_on_local_ollama` **pulls the model onto the

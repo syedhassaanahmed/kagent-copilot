@@ -15,10 +15,10 @@
 # one actually works from inside a Pod before committing it.
 #
 # Docker Desktop + WSL2 note: the pod->host path goes through the Windows host
-# loopback, which the WSL2 *NAT-mode* mirror forwards to WSL ONLY for IPv4
-# sockets. Stock Ollama binds dual-stack [::] (even with OLLAMA_HOST=0.0.0.0),
-# which IPv4-only Kind pods cannot reach. The clean fix (no Ollama change) is WSL
-# *mirrored* networking. See docs/troubleshooting.md.
+# loopback, which the WSL2 NAT-mode mirror forwards to WSL ONLY for IPv4 sockets.
+# Stock Ollama binds dual-stack [::] (even with OLLAMA_HOST=0.0.0.0), which
+# IPv4-only Kind pods cannot reach. 20-ollama-up.sh binds Ollama to IPv4
+# (OLLAMA_HOST=127.0.0.1:PORT via a systemd drop-in). See docs/troubleshooting.md.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -118,21 +118,20 @@ resolve_ollama() {
 
   die "no pod-reachable endpoint maps to your WSL Ollama on port ${PORT}.
   On Docker Desktop + WSL2 the pod->host path goes through the Windows host, which
-  the WSL2 *NAT-mode* mirror forwards to WSL ONLY for IPv4 sockets. Stock Ollama
-  binds dual-stack [::] (shown by 'ss' as '*:${PORT}'), which that mirror skips —
-  so IPv4-only Kind pods cannot reach it.
+  the WSL2 NAT-mode mirror forwards to WSL ONLY for IPv4 sockets. Stock Ollama
+  binds dual-stack [::] (shown by 'ss' as '*:${PORT}'), which IPv4-only Kind pods
+  cannot reach.
 
-  Recommended fix (leaves Ollama completely untouched): enable WSL *mirrored*
-  networking, which shares the Windows network stack (incl. localhost + IPv6):
-      1. In Windows %UserProfile%\\.wslconfig, under [wsl2], add:
-             networkingMode=mirrored
-      2. From Windows run:  wsl --shutdown
-      3. Re-run:  make up
-  Requires Windows 11 22H2+ (build 22621.2359+) and Docker Desktop 4.19+.
+  Fix (keeps the default port ${PORT}): bind Ollama to IPv4 via a systemd drop-in,
+  then re-run 'make up' (this is what 'make ollama' applies automatically):
+      sudo mkdir -p /etc/systemd/system/ollama.service.d && \\
+      printf '[Service]\\nEnvironment=\"OLLAMA_HOST=127.0.0.1:${PORT}\"\\n' \\
+        | sudo tee /etc/systemd/system/ollama.service.d/ipv4.conf && \\
+      sudo systemctl daemon-reload && sudo systemctl restart ollama
 
-  Notes: the Docker Desktop '*.docker.internal in /etc/hosts' setting does NOT help,
-  and switching Docker Desktop to dual IPv4/IPv6 alone does NOT help (the WSL2
-  NAT-mode mirror still won't forward the IPv6/localhost hop into WSL).
+  Notes: OLLAMA_HOST=0.0.0.0 is NOT enough (Ollama still binds dual-stack); the
+  Docker Desktop '*.docker.internal in /etc/hosts' and dual IPv4/IPv6 settings do
+  NOT help. No-Ollama-change alternative: WSL mirrored networking.
   See docs/troubleshooting.md."
 }
 

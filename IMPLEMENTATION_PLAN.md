@@ -4,12 +4,13 @@
 > IPv4-only NAT), IPv4-only Kind pods cannot reach the stock **dual-stack**
 > Ollama (`[::]:11434`) — the WSL2 NAT-mode mirror only forwards IPv4 sockets
 > (confirmed: every host IP returns HTTP 000 from a pod; an IPv4-bound listener
-> returns 200). Per user constraint (do **not** modify the systemd Ollama), the
-> recommended fix is **WSL mirrored networking** (`networkingMode=mirrored` in
-> `%UserProfile%\.wslconfig` + `wsl --shutdown`), which leaves Ollama stock.
-> Scripts/docs reflect this; `35-llm-config.sh` pod-probe is the hard gate.
-> **Pending user action:** enable mirrored networking, then `make up` to validate
-> the end-to-end A2A round-trip. (commit `90db268`)
+> returns 200). **Chosen fix (user-approved):** bind Ollama to IPv4 via a systemd
+> drop-in `OLLAMA_HOST=127.0.0.1:11434`, keeping the default port. `20-ollama-up.sh`
+> applies this automatically (prompting for `sudo`) and `35-llm-config.sh` pod-probe
+> is the hard gate. No-Ollama-change alternative documented: WSL mirrored networking.
+> **Pending user action:** run `make up` (or the one-time drop-in command) so sudo
+> can apply the drop-in, then the end-to-end A2A round-trip validates. Applying a
+> system-level drop-in needs the user's sudo password (no passwordless sudo).
 
 ## Problem Statement
 
