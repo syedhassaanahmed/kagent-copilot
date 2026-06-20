@@ -180,7 +180,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    (or installable). Refuse native Windows (non-WSL). Idempotent, exits 0 cleanly.
    *Verify:* re-running produces no errors/changes on both Linux and macOS.
 
-3. [ ] **install-tools** — `10-install-tools.sh`: idempotently install pinned
+3. [x] **install-tools** — `10-install-tools.sh`: idempotently install pinned
    `kubectl`, `kind`, `helm`, and (for the ollama provider) `ollama`, choosing the
    installer per OS — **Homebrew on macOS, curl/apt on Linux/WSL2** — and the right
    CPU arch. Skip if already present at desired version. *Verify:* versions print on
