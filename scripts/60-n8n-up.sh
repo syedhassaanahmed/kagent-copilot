@@ -55,4 +55,42 @@ else
   warn "could not confirm '${A2A_NODE}' under ${NODE_PACKAGE_DIR}; check n8n community nodes UI/logs"
 fi
 
+# --- owner account ----------------------------------------------------------
+# Modern n8n (2.x) cannot disable user management / login, and
+# N8N_USER_MANAGEMENT_DISABLED is ignored. Instead we pre-provision the owner
+# once via the first-run setup API so the "Set up owner account" wizard is
+# skipped and the demo logs in with known, documented credentials.
+# Idempotent: only runs while setup hasn't happened yet (showSetupOnFirstLoad).
+ensure_owner() {
+  local base="http://localhost:${PORT}"
+  local email="${N8N_OWNER_EMAIL:-demo@example.com}"
+  local pass="${N8N_OWNER_PASSWORD:-DemoPassw0rd}"
+  local first="${N8N_OWNER_FIRST:-Demo}"
+  local last="${N8N_OWNER_LAST:-User}"
+  local show i
+  # /rest/settings can lag behind /healthz right after a container recreate;
+  # retry a few times before deciding whether setup is still pending.
+  for i in 1 2 3 4 5; do
+    show="$(curl -fsS --max-time 5 "${base}/rest/settings" 2>/dev/null \
+      | python3 -c 'import sys,json; print(json.load(sys.stdin)["data"]["userManagement"]["showSetupOnFirstLoad"])' 2>/dev/null || echo unknown)"
+    [ "$show" != "unknown" ] && break
+    sleep 2
+  done
+  if [ "$show" = "False" ]; then
+    ok "n8n owner already provisioned — log in as ${email}"
+    return 0
+  fi
+  log "provisioning n8n owner account (skips the setup wizard)..."
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X POST "${base}/rest/owner/setup" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"${email}\",\"firstName\":\"${first}\",\"lastName\":\"${last}\",\"password\":\"${pass}\"}")"
+  case "$code" in
+    200|201) ok "n8n owner created — log in as ${email} / ${pass}" ;;
+    400|404|409) ok "n8n owner already provisioned — log in as ${email}" ;;
+    *) warn "owner setup returned HTTP ${code}; set up the owner manually in the UI" ;;
+  esac
+}
+ensure_owner
+
 ok "n8n editor: http://localhost:${PORT}"

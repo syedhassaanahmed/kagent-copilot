@@ -39,6 +39,8 @@ fi
 
 log "n8n editor (A2A demo workflow):"
 printf '\n    %s\n\n' "$EDITOR_URL"
+log "Log in with the demo owner account:"
+printf '    email:    %s\n    password: %s\n\n' "${N8N_OWNER_EMAIL:-demo@example.com}" "${N8N_OWNER_PASSWORD:-DemoPassw0rd}"
 log "In the editor, click 'Execute Workflow' and watch the A2A node turn green;"
 log "the kagent agent's reply appears in the 'A2A Response' node output panel."
 

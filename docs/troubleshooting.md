@@ -138,7 +138,7 @@ Tiny CPU models are convenient but unreliable at structured/tool output:
 | Symptom | Fix |
 |---------|-----|
 | `model '<name>' not found (404)` from the agent | Re-run `make llm-config` to pull the model onto the pod-reachable endpoint |
-| n8n editor asks to create an owner account | Expected on first launch; create a local account, then open `make open-ui` again |
+| n8n editor asks to **set up an owner account** | The owner is auto-provisioned by `make up` (n8n can't disable login; `N8N_USER_MANAGEMENT_DISABLED` is ignored in n8n 2.x). Sign in with `demo@example.com` / `DemoPassw0rd` (or your `N8N_OWNER_*` values in `.env`). If the wizard still shows, run `make n8n-up` to (re)provision, or it means a stale `n8n_data` volume — `make down` then `make up`. |
 | `make demo` prints no reply | Run `make status`; ensure the agent is `Ready` and the A2A card returns HTTP 200 |
 | A2A node missing in n8n | `make n8n-up` reinstalls `@agentic-layer/n8n-nodes-a2a` and restarts n8n |
 | Workflow not in editor | `make workflow` re-imports it (idempotent) |

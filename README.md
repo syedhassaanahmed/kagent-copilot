@@ -110,8 +110,14 @@ http://host.docker.internal:30883/api/a2a/kagent/a2a-demo-agent
 ## Live demo walkthrough
 
 1. `make up` — brings the whole stack up idempotently (safe to re-run).
-2. `make open-ui` — opens `http://localhost:5678/workflow/a2a-demo` in the editor.
-   (n8n may ask you to set up a local owner account on first launch.)
+2. `make open-ui` — opens `http://localhost:5678/workflow/a2a-demo` in the editor
+   and prints the demo login. n8n requires a login (it can't be disabled), but the
+   owner account is **auto-provisioned** during `make up`, so you skip the "Set up
+   owner account" wizard and just sign in with the documented demo credentials:
+   - email: `demo@example.com`
+   - password: `DemoPassw0rd`
+
+   Override these via `N8N_OWNER_EMAIL` / `N8N_OWNER_PASSWORD` in `.env`.
 3. Click **Execute Workflow**. Watch the **A2A Send Message** node turn green.
 4. Open the **A2A Response** node's output panel: `agentReply` shows the kagent
    agent's sentence and `a2aStatus` shows `completed` — proof the A2A round-trip
