@@ -237,7 +237,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    appears; `host.docker.internal:<nodePort>` reachable from inside the container;
    re-run is idempotent.
 
-11. [ ] **n8n-workflow** — `n8n/workflows/a2a-demo.json` + `70-import-workflow.sh`:
+11. [x] **n8n-workflow** — `n8n/workflows/a2a-demo.json` + `70-import-workflow.sh`:
     a **visually presentable** workflow built for live demoing in the n8n editor —
     a Manual Trigger → A2A "Send Message" node → a Set/NoOp node that surfaces the
     response, with clearly labeled nodes, a sticky-note title, and a clean
