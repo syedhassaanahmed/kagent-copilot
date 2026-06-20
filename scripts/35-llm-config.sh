@@ -2,17 +2,23 @@
 # ---------------------------------------------------------------------------
 # 35-llm-config.sh — resolve & verify the LLM endpoint the kagent pods will use.
 #
-# No CoreDNS patching. The resolved endpoint is written to LLM_ENDPOINT in .env
-# and later injected straight into the kagent ModelConfig.
+# The resolved endpoint is written to LLM_ENDPOINT in .env and later injected
+# straight into the kagent ModelConfig (no CoreDNS patching).
 #
-#   LLM_PROVIDER=ollama       -> if LLM_ENDPOINT unset, auto-derive a pod-
-#                                reachable host endpoint (platform-aware) and
-#                                probe it from an in-cluster pod.
+#   LLM_PROVIDER=ollama       -> the demo model is pulled onto the LOCAL (WSL)
+#                                Ollama, then the pod-reachable host endpoint is
+#                                resolved and verified from inside a pod.
 #   LLM_PROVIDER=openai|azure -> use LLM_ENDPOINT as-is; probe egress reachability.
 #
 # Why probe from a pod (not the node)? Pods resolve via CoreDNS, which does not
-# know host.docker.internal. We therefore resolve candidate HOST IPs and verify
-# the chosen one actually works from inside a Pod before committing it.
+# know host.docker.internal. We resolve candidate HOST IPs and verify the chosen
+# one actually works from inside a Pod before committing it.
+#
+# Docker Desktop + WSL2 note: the pod->host path goes through the Windows host
+# loopback, which the WSL2 *NAT-mode* mirror forwards to WSL ONLY for IPv4
+# sockets. Stock Ollama binds dual-stack [::] (even with OLLAMA_HOST=0.0.0.0),
+# which IPv4-only Kind pods cannot reach. The clean fix (no Ollama change) is WSL
+# *mirrored* networking. See docs/troubleshooting.md.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -29,15 +35,13 @@ PROBE_IMAGE="curlimages/curl:8.11.1"
 PORT="${OLLAMA_PORT:-11434}"
 PROVIDER="${LLM_PROVIDER:-ollama}"
 
-# probe_pod URL [bearer] -> 0 if the URL returns any HTTP response from a Pod.
-# Uses -f for connectivity but treats HTTP 4xx as "reachable" (e.g. 401 from a
-# hosted API still proves egress works).
+# probe_pod URL [bearer] -> 0 if a Pod gets any HTTP response from URL.
+# curl exit 22 = HTTP >=400 (still "reachable", e.g. 401 from a hosted API).
 probe_pod() {
   local url="$1" bearer="${2:-}" pod="llm-probe-$$"
   local hdr=""
   [ -n "$bearer" ] && hdr="-H \"Authorization: Bearer ${bearer}\""
   $K delete pod "$pod" --ignore-not-found >/dev/null 2>&1 || true
-  # curl exit 22 = HTTP >=400 (reachable); 0 = success. Both mean "connected".
   $K run "$pod" --restart=Never --image="$PROBE_IMAGE" --command -- \
     sh -c "code=\$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 ${hdr} '${url}'); echo HTTP=\$code; case \$code in 000) exit 1;; *) exit 0;; esac" \
     >/dev/null 2>&1 || true
@@ -49,8 +53,8 @@ probe_pod() {
   [ "$rc" -eq 0 ]
 }
 
-# host_gateway_ipv4 -> the IPv4 that host.docker.internal maps to from a
-# container (Docker Desktop: the host VM gateway; Docker Engine: host-gateway).
+# host_gateway_ipv4 -> the IPv4 host.docker.internal maps to from a container
+# (Docker Desktop: the host VM gateway; Docker Engine: host-gateway).
 host_gateway_ipv4() {
   docker run --rm --add-host host.docker.internal:host-gateway "$PROBE_IMAGE" \
     sh -c 'getent ahosts host.docker.internal | awk "{print \$1}" | grep -E "^[0-9]+\." | head -1' 2>/dev/null
@@ -62,20 +66,44 @@ kind_gateway_ipv4() {
     | grep -E '^[0-9]+\.' | head -1
 }
 
+# ensure_model_on_local_ollama — make sure LLM_MODEL exists on the LOCAL Ollama
+# (http://127.0.0.1:PORT). The pull is driven against localhost so the model is
+# always stored in the WSL Ollama, never a remote/foreign one.
+ensure_model_on_local_ollama() {
+  local host="http://127.0.0.1:${PORT}" model="${LLM_MODEL:-qwen2.5:1.5b}"
+  curl -fsS --max-time 5 "${host}/api/tags" >/dev/null 2>&1 \
+    || die "no local Ollama answering on ${host}. Start it (systemd: 'systemctl start ollama', or 'make ollama')."
+  if curl -s --max-time 10 "${host}/api/tags" | grep -q "\"model\":\"${model}\""; then
+    ok "model '${model}' already present on local Ollama"
+    return 0
+  fi
+  log "pulling model '${model}' onto local Ollama (${host}) — one-time..."
+  curl -s --max-time 3600 -X POST "${host}/api/pull" -d "{\"model\":\"${model}\"}" >/dev/null \
+    || die "failed to pull '${model}' onto local Ollama"
+  curl -s --max-time 10 "${host}/api/tags" | grep -q "\"model\":\"${model}\"" \
+    || die "model '${model}' still missing after pull"
+  ok "model '${model}' pulled onto local Ollama"
+}
+
 resolve_ollama() {
+  # 1. The demo model lives on the LOCAL WSL Ollama.
+  ensure_model_on_local_ollama
+
+  # 2. Resolve the pod-reachable host endpoint that routes to that Ollama.
   if [ -n "${LLM_ENDPOINT:-}" ]; then
     log "LLM_ENDPOINT preset to ${LLM_ENDPOINT} — verifying from a pod"
-    probe_pod "${LLM_ENDPOINT%/}/api/tags" \
-      && { ok "Ollama reachable at ${LLM_ENDPOINT}"; return 0; }
-    die "preset LLM_ENDPOINT ${LLM_ENDPOINT} is not reachable from the cluster"
+    if probe_pod "${LLM_ENDPOINT%/}/api/tags"; then
+      ok "Ollama reachable from the cluster at ${LLM_ENDPOINT}"
+      return 0
+    fi
+    warn "preset LLM_ENDPOINT ${LLM_ENDPOINT} is not reachable from pods — re-deriving"
   fi
 
-  log "auto-deriving a pod-reachable Ollama endpoint (platform-aware)..."
-  local hg kg cand seen=""
+  log "auto-deriving a pod-reachable Ollama endpoint..."
+  local hg kg cand ip seen=""
   hg="$(host_gateway_ipv4 || true)"
   kg="$(kind_gateway_ipv4 || true)"
   log "  candidates: host-gateway=${hg:-none} kind-gateway=${kg:-none}"
-
   for ip in "$hg" "$kg"; do
     [ -z "$ip" ] && continue
     case " $seen " in *" $ip "*) continue;; esac
@@ -88,36 +116,24 @@ resolve_ollama() {
     fi
   done
 
-  die "no candidate Ollama endpoint was reachable from the cluster.
-  Ensure Ollama is running and bound to 0.0.0.0:${PORT} (OLLAMA_HOST=0.0.0.0:${PORT} ollama serve),
-  or set LLM_ENDPOINT in .env to an address routable from Kind pods."
-}
+  die "no pod-reachable endpoint maps to your WSL Ollama on port ${PORT}.
+  On Docker Desktop + WSL2 the pod->host path goes through the Windows host, which
+  the WSL2 *NAT-mode* mirror forwards to WSL ONLY for IPv4 sockets. Stock Ollama
+  binds dual-stack [::] (shown by 'ss' as '*:${PORT}'), which that mirror skips —
+  so IPv4-only Kind pods cannot reach it.
 
-# ensure_ollama_model — make sure LLM_MODEL exists ON the resolved endpoint.
-# On Docker Desktop the pod-reachable Ollama may differ from the host CLI's
-# Ollama, so we drive the pull through the endpoint's REST API from inside the
-# cluster (idempotent: skips if the model is already present there).
-ensure_ollama_model() {
-  local ep="${LLM_ENDPOINT%/}" model="${LLM_MODEL:-llama3.2:1b}" pod="ollama-model-$$"
-  log "ensuring model '${model}' is present on ${ep} (pull via API if missing)..."
-  $K delete pod "$pod" --ignore-not-found >/dev/null 2>&1 || true
-  $K run "$pod" --restart=Never --image="$PROBE_IMAGE" --command -- sh -c "
-    if curl -s --max-time 10 '${ep}/api/tags' | grep -q '\"model\":\"${model}\"'; then
-      echo MODEL_PRESENT; exit 0; fi
-    echo PULLING ${model};
-    curl -s --max-time 3600 -X POST '${ep}/api/pull' -d '{\"model\":\"${model}\"}' >/dev/null;
-    if curl -s --max-time 10 '${ep}/api/tags' | grep -q '\"model\":\"${model}\"'; then
-      echo MODEL_PULLED; else echo MODEL_MISSING; exit 1; fi" >/dev/null 2>&1
-  $K wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout=3600s >/dev/null 2>&1
-  local rc=$?
-  local out; out="$($K logs "$pod" 2>/dev/null || true)"
-  $K delete pod "$pod" --ignore-not-found >/dev/null 2>&1 || true
-  if [ "$rc" -eq 0 ]; then
-    ok "model '${model}' available on endpoint (${out//$'\n'/ })"
-  else
-    die "could not ensure model '${model}' on ${ep} (${out//$'\n'/ }).
-  Pull it manually or check Ollama egress from the cluster."
-  fi
+  Recommended fix (leaves Ollama completely untouched): enable WSL *mirrored*
+  networking, which shares the Windows network stack (incl. localhost + IPv6):
+      1. In Windows %UserProfile%\\.wslconfig, under [wsl2], add:
+             networkingMode=mirrored
+      2. From Windows run:  wsl --shutdown
+      3. Re-run:  make up
+  Requires Windows 11 22H2+ (build 22621.2359+) and Docker Desktop 4.19+.
+
+  Notes: the Docker Desktop '*.docker.internal in /etc/hosts' setting does NOT help,
+  and switching Docker Desktop to dual IPv4/IPv6 alone does NOT help (the WSL2
+  NAT-mode mirror still won't forward the IPv6/localhost hop into WSL).
+  See docs/troubleshooting.md."
 }
 
 resolve_hosted() {
@@ -138,7 +154,7 @@ resolve_hosted() {
 
 log "resolving LLM config for provider '${PROVIDER}'"
 case "$PROVIDER" in
-  ollama)      resolve_ollama; load_env; ensure_ollama_model ;;
+  ollama)             resolve_ollama; load_env ;;
   openai|azureOpenAI) resolve_hosted ;;
   *) die "unknown LLM_PROVIDER '${PROVIDER}' (expected ollama|openai|azureOpenAI)" ;;
 esac

@@ -27,26 +27,65 @@ the first reachable one to `LLM_ENDPOINT` in `.env`.
 
 | Platform | Pod → host LLM route |
 |----------|----------------------|
-| Linux / WSL2 (Docker Engine) | Kind docker-network gateway IP (`docker network inspect kind`, e.g. `172.18.0.1`) |
-| macOS / Docker Desktop | the IP `host.docker.internal` resolves to from a container, plus the bridge gateway |
+| Linux (native Docker Engine) | Kind docker-network gateway IP (`docker network inspect kind`, e.g. `172.18.0.1`) |
+| WSL2 / macOS (Docker Desktop) | Windows/VM host gateway `host.docker.internal` → `192.168.65.254` (IPv4); on WSL2 the stock dual-stack Ollama needs **WSL mirrored networking** to be pod-reachable — see the gotcha below |
 
-### ⚠️ Docker Desktop + WSL2 gotcha (important)
+### ⚠️ Docker Desktop + WSL2 gotcha (important): stock Ollama is dual-stack
 
 When Docker runs as **Docker Desktop on Windows with a WSL2 backend** (as opposed to
-native Docker Engine inside the WSL distro), the host-gateway IP `192.168.65.254`
-routes to the **Windows host's** Ollama, **not** the Ollama running inside your WSL
-distro. Symptoms:
+native Docker Engine inside the WSL distro), Kind pods reach the host only through the
+**Windows host gateway `192.168.65.254`**, which lands on the **Windows IPv4 loopback**.
+WSL2's localhost mirror then forwards that loopback to your WSL services — **but only
+for IPv4-bound sockets**. Docker Desktop's default networking is **IPv4-only**.
 
-- The A2A call succeeds at the wire level but the model call fails with
-  `model '<name>' not found (404)` — because the Windows-side Ollama has **no models
-  pulled**, even though `ollama list` inside WSL shows them.
-- The WSL distro IP and the Kind gateway `172.x.0.1` are unreachable / connection-
-  refused from pods.
+Stock Ollama binds **dual-stack IPv6 `[::]:11434`** — `ss -ltn` shows it as `*:11434` —
+**even when you set `OLLAMA_HOST=0.0.0.0:11434`**. The WSL2 mirror does **not** forward
+that IPv6 socket, so the IPv4-only Kind pods cannot reach it.
 
-**Fix (already automated):** `35-llm-config.sh` resolves the endpoint that pods can
-actually reach, then `ensure_ollama_model` **pulls the model onto that endpoint** via
-its REST API (`POST /api/pull`) from inside the cluster — so the model exists exactly
-where the pods will look for it. If you switch `LLM_MODEL`, re-run
+**Symptom:** the A2A call succeeds at the wire level, but the agent's model call hangs
+or fails because the pod cannot open a connection to `192.168.65.254:11434`. A pod
+probe of `192.168.65.254:11434` returns `000`/timeout while `curl localhost:11434`
+works fine inside WSL.
+
+**Root cause (validated):**
+
+| Ollama bind | `ss` shows | Pod → `192.168.65.254:port` |
+|-------------|-----------|------------------------------|
+| `0.0.0.0:port` (true IPv4) | `0.0.0.0:port` | ✅ HTTP 200 |
+| `127.0.0.1:port` (IPv4 loopback) | `127.0.0.1:port` | ✅ HTTP 200 |
+| `0.0.0.0` *as Ollama interprets it* | `*:port` (dual-stack) | ❌ unreachable |
+| `[::]:port` (IPv6) | `[::]:port` / `*:port` | ❌ unreachable |
+
+**Fix (recommended — leaves Ollama completely stock): WSL mirrored networking.**
+Instead of touching Ollama, switch WSL2 from its default NAT networking to
+**mirrored** mode, which shares the Windows network stack (localhost + IPv6) with
+your WSL distro, so the stock dual-stack Ollama becomes reachable via
+`host.docker.internal`:
+
+```ini
+# Windows: %UserProfile%\.wslconfig
+[wsl2]
+networkingMode=mirrored
+```
+
+Then from Windows run `wsl --shutdown`, restart, and `make up` again. Requires
+**Windows 11 22H2+ (build 22621.2359+)** and **Docker Desktop 4.19+**.
+`scripts/35-llm-config.sh` re-probes pod→host reachability and proceeds once it works.
+
+**What does NOT help:** switching Docker Desktop to dual IPv4/IPv6 *alone* (the WSL2
+NAT-mode mirror still won't forward the IPv6/localhost hop into WSL); the Docker
+Desktop "*.docker.internal in /etc/hosts" setting; restarting/reinstalling Ollama;
+rebooting; or `OLLAMA_HOST=0.0.0.0` (Ollama still binds dual-stack `[::]`).
+
+**Alternative (if you accept changing Ollama's listen address):** bind it to an
+explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434` (e.g. a systemd drop-in),
+which the WSL2 NAT-mode mirror *does* forward. This keeps the default port but
+modifies the Ollama service, so mirrored networking above is preferred.
+
+**Fix (model placement, already automated):** `35-llm-config.sh` resolves the endpoint
+that pods can reach, and `ensure_model_on_local_ollama` **pulls the model onto the
+LOCAL WSL Ollama** (`127.0.0.1:11434`) via its REST API (`POST /api/pull`) — so the
+model exists exactly where the pods will look. If you switch `LLM_MODEL`, re-run
 `make llm-config` (or `make up`) so the new model is pulled to the right place.
 
 To diagnose manually, run a throwaway in-cluster probe:
