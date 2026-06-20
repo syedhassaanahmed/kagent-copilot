@@ -29,7 +29,7 @@ fi
 
 require_cmd ollama
 PORT="${OLLAMA_PORT:-11434}"
-MODEL="${LLM_MODEL:-llama3.2:1b}"
+MODEL="${LLM_MODEL:-qwen2.5:1.5b}"
 PIDFILE="$REPO_ROOT/.ollama.pid"
 
 api_up() { curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/tags" >/dev/null 2>&1; }

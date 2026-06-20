@@ -31,7 +31,9 @@ json="${raw#"${raw%%\{*}"}"
 A2A_JSON="$json" python3 <<'PY'
 import json, os, sys
 
-data = json.loads(os.environ["A2A_JSON"])
+# n8n may print trailing log lines (e.g. deprecation notices) AFTER the JSON
+# run-data, so decode just the first JSON value and ignore any trailing output.
+data, _ = json.JSONDecoder().raw_decode(os.environ["A2A_JSON"])
 
 reply, status = None, None
 def walk(o):

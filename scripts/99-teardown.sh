@@ -57,7 +57,7 @@ fi
 
 # --- Ollama (opt-in) ------------------------------------------------------
 if [ "$RM_MODEL" = 1 ] && have_cmd ollama; then
-  model="${LLM_MODEL:-llama3.2:1b}"
+  model="${LLM_MODEL:-qwen2.5:1.5b}"
   if ollama list 2>/dev/null | grep -q "${model%%:*}"; then
     log "removing model ${model}..."
     ollama rm "$model" || warn "could not remove model ${model}"
