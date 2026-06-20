@@ -224,9 +224,12 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
 7. [x] **kagent-install** — `40-kagent-install.sh`: install `kagent-crds` + `kagent`
    Helm OCI charts (controller + UI). Set `controller.service.type=NodePort` (fixed
    nodePort) and `a2aBaseUrl` to the host-reachable URL so the agent card `url` is
-   correct. The LLM is **not** wired here — it's applied as a provider-agnostic
-   `ModelConfig` in the next task. Wait for controller/UI rollout. *Verify:* pods
-   Ready; A2A NodePort reachable from the host; re-run upgrades idempotently.
+   correct. Disable the chart's bundled demo agents (k8s/istio/cilium/argo/helm/...)
+   via `<agent>.enabled=false` (toggle with `KAGENT_DISABLE_BUILTIN_AGENTS`, default
+   `true`) so only this repo's Agent runs. The LLM is **not** wired here — it's applied
+   as a provider-agnostic `ModelConfig` in the next task. Wait for controller/UI
+   rollout. *Verify:* pods Ready; A2A NodePort reachable from the host; re-run upgrades
+   idempotently.
 
 8. [x] **kagent-agent** — `50-kagent-agent-apply.sh` + `kagent/agent.yaml`: render a
    **provider-agnostic `ModelConfig`** from `.env` (`provider`/`model` + `ollama.host`

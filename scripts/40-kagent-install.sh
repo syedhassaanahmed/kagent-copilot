@@ -30,6 +30,17 @@ KAGENT_CHART="oci://ghcr.io/kagent-dev/kagent/helm/kagent"
 # container (which has host.docker.internal:host-gateway).
 A2A_BASE_URL="http://host.docker.internal:${NODEPORT}"
 
+# Built-in demo agents shipped by the chart (k8s/istio/cilium/argo/helm/...).
+# This repo provisions its own Agent, so disable them by default to keep the
+# cluster lean. Override with KAGENT_DISABLE_BUILTIN_AGENTS=false to keep them.
+BUILTIN_AGENTS="k8s-agent kgateway-agent istio-agent promql-agent observability-agent argo-rollouts-agent helm-agent cilium-policy-agent cilium-manager-agent cilium-debug-agent"
+disable_args=()
+if [ "${KAGENT_DISABLE_BUILTIN_AGENTS:-true}" = "true" ]; then
+  for a in $BUILTIN_AGENTS; do
+    disable_args+=(--set "${a}.enabled=false")
+  done
+fi
+
 log "installing kagent CRDs (v${KAGENT_VERSION})..."
 helm upgrade --install kagent-crds "$CRDS_CHART" \
   --version "$KAGENT_VERSION" \
@@ -41,12 +52,16 @@ ok "kagent CRDs installed"
 log "installing kagent controller/UI (v${KAGENT_VERSION})..."
 # providers.default=ollama avoids the default ModelConfig needing a cloud API
 # key; our Agent references its own ModelConfig regardless.
+if [ "${#disable_args[@]}" -gt 0 ]; then
+  log "disabling built-in demo agents (${BUILTIN_AGENTS// /, })"
+fi
 helm upgrade --install kagent "$KAGENT_CHART" \
   --version "$KAGENT_VERSION" \
   --kube-context "$CTX" \
   --namespace "$NS" \
   --set providers.default=ollama \
   --set controller.a2aBaseUrl="$A2A_BASE_URL" \
+  ${disable_args[@]+"${disable_args[@]}"} \
   --wait --timeout 10m
 ok "kagent installed"
 

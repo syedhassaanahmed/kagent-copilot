@@ -45,6 +45,7 @@ All configuration lives in `.env` (created from `.env.example`). Key knobs:
 | `LLM_MODEL` | model / deployment name (default `qwen2.5:1.5b`) |
 | `LLM_ENDPOINT` | LLM base URL/host (blank = auto-derive for ollama) |
 | `LLM_API_KEY` | API key for hosted providers (blank for ollama) |
+| `KAGENT_DISABLE_BUILTIN_AGENTS` | `true` (default) skips kagent's bundled demo agents (k8s/istio/cilium/...) so only this repo's Agent runs |
 
 ### Swapping the LLM backend
 
