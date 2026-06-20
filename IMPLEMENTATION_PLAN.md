@@ -174,7 +174,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    wrappers to avoid GNU-vs-BSD differences). *Verify:* `make help` lists targets;
    `lib.sh` sourced on Linux and macOS reports the correct OS/arch.
 
-2. [ ] **preflight** — `00-preflight.sh`: **detect OS/arch** (Linux, WSL2, macOS;
+2. [x] **preflight** — `00-preflight.sh`: **detect OS/arch** (Linux, WSL2, macOS;
    Intel/Apple Silicon) and assert the right runtime (Docker Engine on Linux/WSL2,
    Docker Desktop running on macOS), enough RAM/CPU, and required commands present
    (or installable). Refuse native Windows (non-WSL). Idempotent, exits 0 cleanly.
@@ -263,7 +263,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
     demo), `make status`, `make logs`, `make down` (teardown), `make help`.
     *Verify:* `make up && make demo` works end-to-end; second `make up` is a no-op.
 
-15. [ ] **teardown** — `99-teardown.sh`: delete Kind cluster, stop Compose, optionally
+15. [x] **teardown** — `99-teardown.sh`: delete Kind cluster, stop Compose, optionally
     stop Ollama / remove model. Idempotent. *Verify:* re-run cleanly with nothing left.
 
 16. [ ] **docs** — `README.md` (prereqs, quickstart, the Make commands, architecture
