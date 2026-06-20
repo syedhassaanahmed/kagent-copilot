@@ -93,6 +93,33 @@ resolve_ollama() {
   or set LLM_ENDPOINT in .env to an address routable from Kind pods."
 }
 
+# ensure_ollama_model — make sure LLM_MODEL exists ON the resolved endpoint.
+# On Docker Desktop the pod-reachable Ollama may differ from the host CLI's
+# Ollama, so we drive the pull through the endpoint's REST API from inside the
+# cluster (idempotent: skips if the model is already present there).
+ensure_ollama_model() {
+  local ep="${LLM_ENDPOINT%/}" model="${LLM_MODEL:-llama3.2:1b}" pod="ollama-model-$$"
+  log "ensuring model '${model}' is present on ${ep} (pull via API if missing)..."
+  $K delete pod "$pod" --ignore-not-found >/dev/null 2>&1 || true
+  $K run "$pod" --restart=Never --image="$PROBE_IMAGE" --command -- sh -c "
+    if curl -s --max-time 10 '${ep}/api/tags' | grep -q '\"model\":\"${model}\"'; then
+      echo MODEL_PRESENT; exit 0; fi
+    echo PULLING ${model};
+    curl -s --max-time 3600 -X POST '${ep}/api/pull' -d '{\"model\":\"${model}\"}' >/dev/null;
+    if curl -s --max-time 10 '${ep}/api/tags' | grep -q '\"model\":\"${model}\"'; then
+      echo MODEL_PULLED; else echo MODEL_MISSING; exit 1; fi" >/dev/null 2>&1
+  $K wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$pod" --timeout=3600s >/dev/null 2>&1
+  local rc=$?
+  local out; out="$($K logs "$pod" 2>/dev/null || true)"
+  $K delete pod "$pod" --ignore-not-found >/dev/null 2>&1 || true
+  if [ "$rc" -eq 0 ]; then
+    ok "model '${model}' available on endpoint (${out//$'\n'/ })"
+  else
+    die "could not ensure model '${model}' on ${ep} (${out//$'\n'/ }).
+  Pull it manually or check Ollama egress from the cluster."
+  fi
+}
+
 resolve_hosted() {
   [ -n "${LLM_ENDPOINT:-}" ] || die "LLM_PROVIDER=${PROVIDER} requires LLM_ENDPOINT in .env"
   local base="${LLM_ENDPOINT%/}" url
@@ -111,7 +138,7 @@ resolve_hosted() {
 
 log "resolving LLM config for provider '${PROVIDER}'"
 case "$PROVIDER" in
-  ollama)      resolve_ollama ;;
+  ollama)      resolve_ollama; load_env; ensure_ollama_model ;;
   openai|azureOpenAI) resolve_hosted ;;
   *) die "unknown LLM_PROVIDER '${PROVIDER}' (expected ollama|openai|azureOpenAI)" ;;
 esac
