@@ -224,7 +224,7 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    agent` Ready; agent card retrievable from the A2A endpoint
    (`curl .../.well-known/agent-card.json`).
 
-9. [ ] **verify-a2a-endpoint** — Runtime smoke test (path & wire shape already validated
+9. [x] **verify-a2a-endpoint** — Runtime smoke test (path & wire shape already validated
    in source, see findings). Confirm the live agent card is served at
    `{agentURL}/.well-known/agent-card.json` and a raw `curl` JSON-RPC `message/send`
    (no version header → legacy v0) returns a response. *Verify:* a manual `curl`
