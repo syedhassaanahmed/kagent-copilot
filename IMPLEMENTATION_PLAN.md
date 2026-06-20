@@ -186,14 +186,14 @@ Check off each box (`[ ]` → `[x]`) as a task is completed so the Ralph loop kn
    CPU arch. Skip if already present at desired version. *Verify:* versions print on
    both platforms; re-run is a no-op.
 
-4. [ ] **ollama-up** — `20-ollama-up.sh` (**runs only when `LLM_PROVIDER=ollama`**;
+4. [x] **ollama-up** — `20-ollama-up.sh` (**runs only when `LLM_PROVIDER=ollama`**;
    no-op for hosted providers): start `ollama serve` with
    **`OLLAMA_HOST=0.0.0.0:11434`** (so Kind pods can reach it, not just loopback) and
    pull `LLM_MODEL` once. Use the OS-appropriate way to launch/keep it running.
    *Verify:* `curl :11434/api/tags` lists the model; listener on `0.0.0.0`; re-run
    does not re-pull.
 
-5. [ ] **kind-up** — `30-kind-up.sh` + `kind/cluster.yaml`: create Kind cluster (named)
+5. [x] **kind-up** — `30-kind-up.sh` + `kind/cluster.yaml`: create Kind cluster (named)
    with `extraPortMappings` exposing the kagent A2A NodePort to the host. Skip if the
    cluster already exists. *Verify:* `kubectl get nodes` Ready; re-run is a no-op.
 
