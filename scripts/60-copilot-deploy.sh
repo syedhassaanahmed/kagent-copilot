@@ -225,10 +225,35 @@ publish_copilot() {
   local id
   id="$(copilot_id || true)"
   [ -n "$id" ] || die "could not find deployed Copilot ID for '${COPILOT_AGENT_DISPLAY_NAME}' (is it imported?)"
-  pac copilot publish \
-    --environment "$PAC_ENVIRONMENT_URL" \
-    --bot "$id"
-  ok "host agent published (${id})"
+
+  # `pac copilot publish` submits the publish then polls its status for up to
+  # 10 minutes. The publish keeps processing server-side even when that poll
+  # times out ("Copilot status polling exceeded max wait time"), so retry: a
+  # fresh attempt usually finds most of the work already done and completes
+  # quickly. Only a polling timeout is retried; other errors fail immediately.
+  local attempt out rc
+  for attempt in 1 2 3; do
+    set +e
+    out="$(pac copilot publish --environment "$PAC_ENVIRONMENT_URL" --bot "$id" 2>&1)"
+    rc=$?
+    set -e
+    printf '%s\n' "$out" >&2
+    if [ "$rc" -eq 0 ]; then
+      ok "host agent published (${id})"
+      return 0
+    fi
+    if printf '%s' "$out" | grep -qi 'status polling exceeded max wait time'; then
+      if [ "$attempt" -lt 3 ]; then
+        warn "publish status polling timed out (attempt ${attempt}/3) — the publish is still processing server-side; retrying in 30s..."
+        sleep 30
+        continue
+      fi
+      warn "publish status polling timed out after ${attempt} attempts; the publish was submitted and is likely still completing server-side"
+      warn "verify in the Maker portal (Copilot Studio → '${COPILOT_AGENT_DISPLAY_NAME}' → Publish); re-run 'make deploy' if it did not finish"
+      die "host agent publish did not confirm within the allotted time"
+    fi
+    die "host agent publish failed (exit ${rc})"
+  done
 }
 
 ensure_pac_auth
