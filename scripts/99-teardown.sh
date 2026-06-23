@@ -5,34 +5,32 @@
 # Removes (in reverse order of creation):
 #   - local devtunnel host process, if this repo started one
 #   - Kind cluster (which removes kagent + all CRs)
-# Optionally removes cloud-side Copilot Studio / Dev Tunnel resources and stops
-# Ollama / removes the model when called with flags.
+# Optionally removes cloud-side Copilot Studio / Dev Tunnel resources and the
+# pulled Ollama model when called with flags. The Ollama server itself is never
+# stopped (it may be a shared/system service this repo did not start).
 #
 # Usage:
 #   99-teardown.sh                 # stop local tunnel host + UI forward; remove Kind cluster
-#   99-teardown.sh --stop-ollama   # also stop the ollama serve we started
 #   99-teardown.sh --rm-model      # also remove the pulled model
 #   99-teardown.sh --copilot       # also delete Copilot Studio solution/fallback parts
 #   99-teardown.sh --delete-tunnel # also delete the persistent named Dev Tunnel
-#   99-teardown.sh --all           # stop-ollama + rm-model + copilot + delete-tunnel
+#   99-teardown.sh --all           # rm-model + copilot + delete-tunnel
 #   99-teardown.sh --help          # print this usage
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 load_env
 
-STOP_OLLAMA=0
 RM_MODEL=0
 DELETE_COPILOT=0
 DELETE_TUNNEL=0
 SHOW_HELP=0
 for a in "$@"; do
   case "$a" in
-    --stop-ollama) STOP_OLLAMA=1 ;;
     --rm-model)    RM_MODEL=1 ;;
     --copilot)     DELETE_COPILOT=1 ;;
     --delete-tunnel) DELETE_TUNNEL=1 ;;
-    --all)         STOP_OLLAMA=1; RM_MODEL=1; DELETE_COPILOT=1; DELETE_TUNNEL=1 ;;
+    --all)         RM_MODEL=1; DELETE_COPILOT=1; DELETE_TUNNEL=1 ;;
     --help|-h)
       SHOW_HELP=1
       ;;
@@ -216,24 +214,14 @@ else
   warn "kind not installed — skipping cluster teardown"
 fi
 
-# --- Ollama (opt-in) ------------------------------------------------------
+# --- Ollama model (opt-in) ------------------------------------------------
+# We never stop the Ollama server itself (it may be a shared/system service we
+# did not start); --rm-model only removes the model this demo pulled.
 if [ "$RM_MODEL" = 1 ] && have_cmd ollama; then
   model="${LLM_MODEL:-qwen2.5:1.5b}"
   if ollama list 2>/dev/null | grep -q "${model%%:*}"; then
     log "removing model ${model}..."
     ollama rm "$model" || warn "could not remove model ${model}"
-  fi
-fi
-
-if [ "$STOP_OLLAMA" = 1 ]; then
-  pidfile="$REPO_ROOT/.ollama.pid"
-  if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-    log "stopping ollama serve (pid $(cat "$pidfile"))..."
-    kill "$(cat "$pidfile")" 2>/dev/null || true
-    rm -f "$pidfile"
-    ok "ollama stopped"
-  else
-    warn "no tracked ollama process to stop (started outside this repo?)"
   fi
 fi
 

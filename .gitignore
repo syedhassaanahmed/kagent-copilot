@@ -21,7 +21,7 @@ tmp/
 __pycache__/
 *.pyc
 
-# Runtime PID files (e.g. .ollama.pid written by scripts/20-ollama-up.sh)
+# Runtime PID files
 *.pid
 
 # OS / editor cruft

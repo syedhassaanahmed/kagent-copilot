@@ -5,7 +5,7 @@
 #
 # Idempotent:
 #   - reuses an already-running server if one answers on $OLLAMA_PORT
-#   - otherwise starts one bound to 127.0.0.1:$OLLAMA_PORT (pid in .ollama.pid)
+#   - otherwise starts one bound to 127.0.0.1:$OLLAMA_PORT (log in .ollama.log)
 #   - ensures an IPv4 listener (see below), pulling LLM_MODEL only if missing
 #
 # Why IPv4 (Docker Desktop + WSL2):
@@ -30,7 +30,6 @@ fi
 require_cmd ollama
 PORT="${OLLAMA_PORT:-11434}"
 MODEL="${LLM_MODEL:-qwen2.5:1.5b}"
-PIDFILE="$REPO_ROOT/.ollama.pid"
 
 api_up() { curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/tags" >/dev/null 2>&1; }
 
@@ -113,7 +112,6 @@ if api_up; then
 else
   log "starting 'ollama serve' on 127.0.0.1:${PORT} (IPv4)..."
   OLLAMA_HOST="127.0.0.1:${PORT}" nohup ollama serve >"$REPO_ROOT/.ollama.log" 2>&1 &
-  echo $! > "$PIDFILE"
   wait_for "ollama API on :${PORT}" 60 bash -c "curl -fsS --max-time 3 http://127.0.0.1:${PORT}/api/tags >/dev/null"
   ensure_ipv4
 fi

@@ -30,7 +30,7 @@ status: ## Show status of cluster, kagent, Dev Tunnel and Power Platform auth
 logs: ## Tail kagent controller + agent + devtunnel host logs (TARGET=kagent|agent|tunnel optional)
 	@bash $(S)/97-logs.sh $(TARGET)
 
-down: ## Tear down EVERYTHING (idempotent; skips whatever is absent): cluster, tunnel (+delete), Copilot Studio, Ollama
+down: ## Tear down EVERYTHING (idempotent; skips whatever is absent): cluster, tunnel (+delete), Copilot Studio, Ollama model
 	@bash $(S)/99-teardown.sh --all
 
 # --- individual steps (local kagent + tunnel) -----------------------------
