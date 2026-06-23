@@ -2,9 +2,9 @@
 # ---------------------------------------------------------------------------
 # 40-kagent-install.sh — install kagent (CRDs + controller/UI) via Helm OCI.
 #
-# Exposes the controller A2A port (8083) on a deterministic NodePort so the
-# n8n container can reach it through the Kind host port mapping. The LLM is NOT
-# wired here — a provider-agnostic ModelConfig is applied by 50-kagent-agent.
+# Exposes the controller A2A port (8083) on a deterministic NodePort so a
+# Microsoft Copilot Studio agent can reach it through a dev tunnel. The LLM is
+# NOT wired here — a provider-agnostic ModelConfig is applied by 50-kagent-agent.
 #
 # Idempotent: helm upgrade --install + server-side apply of the NodePort svc.
 # ---------------------------------------------------------------------------
@@ -16,19 +16,35 @@ load_env
 require_cmd helm
 require_cmd kubectl
 
-CLUSTER="${KIND_CLUSTER_NAME:-kagent-n8n}"
+CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 NS="${KAGENT_NAMESPACE:-kagent}"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
-KAGENT_VERSION="${KAGENT_VERSION:-0.9.9}"
+# Pinned to 0.9.6 — the last kagent release that serves a pure A2A v0.3 agent card.
+# kagent 0.9.7+ (commit "Migrate from A2A v0 to v1") adds a `supportedInterfaces`
+# array with a protocolVersion "1.0" entry to the card. Copilot Studio's A2A bind
+# flow ("Add agent -> A2A agent") rejects that as "A2A protocol v1, which is not
+# supported yet. Please use an agent that provides a v0.3 agent card." Verified by
+# hand: 0.9.7+ cards fail to bind, 0.9.6 cards bind and auto-populate name/desc.
+KAGENT_VERSION="${KAGENT_VERSION:-0.9.6}"
 
 CRDS_CHART="oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds"
 KAGENT_CHART="oci://ghcr.io/kagent-dev/kagent/helm/kagent"
 
-# Advertised base URL for the agent card — must be reachable from the n8n
-# container (which has host.docker.internal:host-gateway).
-A2A_BASE_URL="http://host.docker.internal:${NODEPORT}"
+# Advertised base URL for the agent card. Copilot Studio fetches the card at
+# {a2aBaseUrl}/.well-known/agent-card.json and POSTs A2A messages to
+# {a2aBaseUrl}/api/a2a/<ns>/<agent>, so this MUST be the public Dev Tunnel HTTPS
+# URL resolved by 25-devtunnel-up.sh (written to .env as TUNNEL_URL). If TUNNEL_URL
+# is unset we fall back to the host-routable local URL so a kagent-only bring-up
+# still works (the tunnel/Copilot path just won't be reachable from the cloud).
+if [ -n "${TUNNEL_URL:-}" ]; then
+  A2A_BASE_URL="${TUNNEL_URL%/}"
+  ok "agent card a2aBaseUrl = ${A2A_BASE_URL} (Dev Tunnel)"
+else
+  A2A_BASE_URL="http://host.docker.internal:${NODEPORT}"
+  warn "TUNNEL_URL not set — using local a2aBaseUrl ${A2A_BASE_URL}; run 25-devtunnel-up.sh first so Copilot Studio can reach kagent"
+fi
 
 # Built-in demo agents shipped by the chart (k8s/istio/cilium/argo/helm/...).
 # This repo provisions its own Agent, so disable them by default to keep the
@@ -94,7 +110,7 @@ metadata:
   name: kagent-a2a-nodeport
   labels:
     app.kubernetes.io/part-of: kagent
-    kagent-n8n-demo: "true"
+    kagent-copilot-demo: "true"
 spec:
   type: NodePort
   selector:

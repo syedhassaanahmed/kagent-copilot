@@ -28,7 +28,7 @@ load_env
 require_cmd kubectl
 require_cmd docker
 
-CLUSTER="${KIND_CLUSTER_NAME:-kagent-n8n}"
+CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 PROBE_IMAGE="curlimages/curl:8.11.1"

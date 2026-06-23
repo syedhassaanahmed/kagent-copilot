@@ -4,6 +4,7 @@
 #
 #   kubectl, kind, helm        (always)
 #   ollama                     (only when LLM_PROVIDER=ollama)
+#   devtunnel, pac             (always; optional/non-fatal installers)
 #
 # Installer is chosen per OS: Homebrew on macOS, direct download on Linux/WSL2.
 # A tool that is already on PATH is left untouched (non-destructive) and its
@@ -83,6 +84,43 @@ install_ollama() {
   ok "ollama installed"
 }
 
+install_devtunnel() {
+  if have_cmd devtunnel; then ok "devtunnel present: $(devtunnel --version 2>/dev/null | head -1)"; return; fi
+  log "installing devtunnel..."
+  if [ "$OS" = macos ]; then
+    if have_cmd brew && brew install --cask devtunnel; then
+      ok "devtunnel installed"
+    else
+      warn "could not install devtunnel with Homebrew; install manually from https://aka.ms/DevTunnelCli"
+    fi
+  else
+    if curl -sL https://aka.ms/DevTunnelCliInstall | bash; then
+      if have_cmd devtunnel; then
+        ok "devtunnel installed"
+      else
+        warn "devtunnel installed but is not on PATH; add ~/.local/bin or the reported install directory to PATH"
+      fi
+    else
+      warn "could not install devtunnel; install manually from https://aka.ms/DevTunnelCli"
+    fi
+  fi
+}
+
+install_pac() {
+  if have_cmd pac; then ok "pac present: $(pac --version 2>/dev/null | head -1)"; return; fi
+  if have_cmd dotnet; then
+    log "installing pac..."
+    dotnet tool install --global Microsoft.PowerApps.CLI.Tool || dotnet tool update --global Microsoft.PowerApps.CLI.Tool || true
+    if have_cmd pac; then
+      ok "pac installed"
+    else
+      warn "pac installed but is not on PATH; add ~/.dotnet/tools to PATH"
+    fi
+  else
+    warn "pac requires the .NET SDK; install .NET 8+ then re-run, or install pac manually per https://aka.ms/PowerPlatformCLI"
+  fi
+}
+
 log "installing tools for ${OS}/${ARCH} (prefix: ${BINDIR})"
 install_kubectl
 install_kind
@@ -92,6 +130,8 @@ if [ "${LLM_PROVIDER:-ollama}" = "ollama" ]; then
 else
   log "LLM_PROVIDER=${LLM_PROVIDER} — skipping ollama install"
 fi
+install_devtunnel
+install_pac
 
 echo
 ok "tool versions:"
@@ -99,4 +139,6 @@ printf '  kubectl : %s\n' "$(kubectl version --client 2>/dev/null | head -1 || e
 printf '  kind    : %s\n' "$(kind version 2>/dev/null || echo missing)"
 printf '  helm    : %s\n' "$(helm version --short 2>/dev/null || echo missing)"
 have_cmd ollama && printf '  ollama  : %s\n' "$(ollama --version 2>/dev/null | head -1)"
+have_cmd devtunnel && printf '  devtunnel: %s\n' "$(devtunnel --version 2>/dev/null | head -1)"
+have_cmd pac && printf '  pac     : %s\n' "$(pac --version 2>/dev/null | head -1)"
 ok "install-tools complete"

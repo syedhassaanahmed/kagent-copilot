@@ -7,14 +7,12 @@ set -euo pipefail
 ensure_env_file
 load_env
 
-CLUSTER="${KIND_CLUSTER_NAME:-kagent-n8n}"
+CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 NS="${KAGENT_NAMESPACE:-kagent}"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
-N8N_PORT="${N8N_PORT:-5678}"
-COMPOSE_FILE="$REPO_ROOT/n8n/docker-compose.yaml"
 
 hr() { printf '%s\n' "----------------------------------------------------------------"; }
 
@@ -51,12 +49,37 @@ else
   printf '  not installed\n'
 fi
 
-hr; log "n8n (Docker Compose)"
-if [ -f "$COMPOSE_FILE" ] && docker compose -f "$COMPOSE_FILE" ps 2>/dev/null | grep -q n8n; then
-  docker compose -f "$COMPOSE_FILE" ps 2>/dev/null | sed 's/^/  /'
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${N8N_PORT}/" 2>/dev/null || echo 000)"
-  printf '  editor      : http://localhost:%s/ (HTTP %s)\n' "$N8N_PORT" "$code"
+hr; log "Dev Tunnel (public A2A exposure)"
+TUNNEL_NAME="${TUNNEL_NAME:-kagent-copilot-a2a}"
+pidfile="$REPO_ROOT/.run/devtunnel-host.pid"
+if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile" 2>/dev/null)" 2>/dev/null; then
+  printf '  host process: up (pid %s)\n' "$(cat "$pidfile")"
 else
-  printf '  not running\n'
+  printf '  host process: DOWN (run 25-devtunnel-up.sh / make devtunnel)\n'
 fi
+printf '  tunnel name : %s\n' "$TUNNEL_NAME"
+if [ -n "${TUNNEL_URL:-}" ]; then
+  printf '  TUNNEL_URL  : %s\n' "$TUNNEL_URL"
+  tcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
+    -H 'X-Tunnel-Skip-AntiPhishing-Page: true' \
+    "${TUNNEL_URL%/}/api/a2a/${NS}/${AGENT}/.well-known/agent-card.json" 2>/dev/null || echo 000)"
+  printf '  card (tunnel): %s/api/a2a/%s/%s/.well-known/agent-card.json (HTTP %s)\n' "${TUNNEL_URL%/}" "$NS" "$AGENT" "$tcode"
+else
+  printf '  TUNNEL_URL  : not set (run 25-devtunnel-up.sh)\n'
+fi
+
+hr; log "Power Platform / Copilot Studio"
+printf '  env URL     : %s\n' "${PAC_ENVIRONMENT_URL:-<unset>}"
+if have_cmd pac; then
+  if pac auth list >/dev/null 2>&1 && pac auth list 2>/dev/null | grep -q '\*'; then
+    printf '  pac auth    : active profile selected\n'
+  else
+    printf '  pac auth    : no active profile (run 60-copilot-deploy.sh / make copilot)\n'
+  fi
+else
+  printf '  pac         : not installed (run make tools)\n'
+fi
+printf '  host agent  : %s (schema %s, solution %s)\n' \
+  "${COPILOT_AGENT_DISPLAY_NAME:-kagent A2A Host}" "${COPILOT_AGENT_SCHEMA_NAME:-kagent_a2a_host}" "${COPILOT_SOLUTION_NAME:-kagentcopilota2a}"
+printf '  A2A endpoint: %s\n' "${TUNNEL_URL:+${TUNNEL_URL%/}/api/a2a/${NS}/${AGENT}}"
 hr

@@ -13,7 +13,7 @@ load_env
 require_cmd kind
 require_cmd kubectl
 
-CLUSTER="${KIND_CLUSTER_NAME:-kagent-n8n}"
+CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
 CFG="$REPO_ROOT/kind/cluster.yaml"
 
@@ -27,8 +27,8 @@ name: ${CLUSTER}
 nodes:
   - role: control-plane
     extraPortMappings:
-      # Publish the kagent controller A2A NodePort to the host so n8n
-      # (Docker Compose) can reach it via host.docker.internal:${NODEPORT}.
+      # Publish the kagent controller A2A NodePort to the host so a dev tunnel
+      # can expose it to Microsoft Copilot Studio.
       - containerPort: ${NODEPORT}
         hostPort: ${NODEPORT}
         protocol: TCP

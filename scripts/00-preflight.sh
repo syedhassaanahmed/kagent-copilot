@@ -54,7 +54,47 @@ fi
 if docker compose version >/dev/null 2>&1; then
   ok "docker compose v2 available"
 else
-  warn "'docker compose' (v2 plugin) not found — needed for the n8n step"
+  warn "'docker compose' (v2 plugin) not found — only needed for legacy cleanup paths"
+fi
+
+# --- Copilot Studio / Dev Tunnels prerequisites (warn-only) ---------------
+# These power the cloud side of the demo (Copilot Studio agent <-> kagent over
+# A2A through a Dev Tunnel). They are NOT required to bring up kagent locally,
+# so missing tools/logins only warn here — 'make tools' installs the CLIs and
+# the devtunnel/copilot scripts perform interactive login on first run.
+load_env >/dev/null 2>&1 || true
+
+# devtunnel — exposes the local kagent A2A endpoint publicly.
+if have_cmd devtunnel; then
+  ok "devtunnel present ($(devtunnel --version 2>/dev/null | head -1 || echo '?'))"
+  if devtunnel user show >/dev/null 2>&1; then
+    ok "devtunnel: logged in"
+  else
+    warn "devtunnel: not logged in — '25-devtunnel-up.sh' will prompt 'devtunnel user login'"
+  fi
+else
+  warn "devtunnel not found — run 'make tools' (needed to expose kagent for Copilot Studio)"
+fi
+
+# pac — Power Platform CLI, deploys/publishes the Copilot Studio host agent.
+if have_cmd pac; then
+  ok "pac present ($(pac --version 2>/dev/null | grep -oE 'Version: [0-9.]+' | head -1 || echo '?'))"
+  if pac auth list >/dev/null 2>&1 && pac auth list 2>/dev/null | grep -q '\*'; then
+    ok "pac: an authenticated profile is selected"
+  else
+    warn "pac: no active auth profile — '60-copilot-deploy.sh' runs 'pac auth create' against PAC_ENVIRONMENT_URL"
+  fi
+else
+  warn "pac not found — run 'make tools' (needed to deploy the Copilot Studio agent)"
+fi
+
+# PAC_ENVIRONMENT_URL — Dataverse environment the host agent deploys into.
+if [ -n "${PAC_ENVIRONMENT_URL:-}" ]; then
+  ok "PAC_ENVIRONMENT_URL set (${PAC_ENVIRONMENT_URL})"
+elif derived="$(pac_env_url 2>/dev/null)" && [ -n "$derived" ]; then
+  ok "PAC_ENVIRONMENT_URL not set — will auto-use the active pac profile (${derived})"
+else
+  warn "PAC_ENVIRONMENT_URL not set and no active pac profile — set it in .env (see 'pac org list') before 'make copilot'"
 fi
 
 ok "preflight passed for ${OS}/${ARCH}"

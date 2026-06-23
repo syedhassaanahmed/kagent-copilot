@@ -10,13 +10,10 @@
 *-secret.yaml
 secrets/
 
-# n8n local data (Docker Compose volume)
-n8n/.n8n/
-n8n/data/
-
 # Tool / build caches and logs
 .tmp/
 tmp/
+.run/
 *.log
 *.tgz
 

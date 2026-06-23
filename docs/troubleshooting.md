@@ -1,160 +1,108 @@
 # Troubleshooting
 
-Notes on the tricky parts of this demo: networking between
-n8n (Compose) ↔ kagent (Kind) ↔ the host LLM, and small-model behaviour.
+Notes on the tricky parts of this demo: Copilot Studio → Microsoft Dev Tunnels → kagent (Kind) → host/hosted LLM, plus small-model behaviour.
 
 ## A2A endpoint & wire shape
 
-- **Agent A2A URL:** `http://<host>:<KAGENT_A2A_NODEPORT>/api/a2a/<namespace>/<agent>`
-  (default `http://localhost:30883/api/a2a/kagent/a2a-demo-agent`).
-- **Agent card:** `…/.well-known/agent-card.json` (HTTP 200). The legacy
-  `agent.json` path is no longer used.
-- **`message/send`** is JSON-RPC 2.0 (legacy v0, no version header):
+- **Local agent A2A URL:** `http://<host>:<KAGENT_A2A_NODEPORT>/api/a2a/<namespace>/<agent>` (default `http://localhost:30883/api/a2a/kagent/a2a-demo-agent`).
+- **Copilot Studio URL:** the Microsoft Dev Tunnel HTTPS URL mapped to the local A2A NodePort, with the same `/api/a2a/<namespace>/<agent>` path.
+- **Agent card:** `…/.well-known/agent-card.json` (HTTP 200). The legacy `agent.json` path is no longer used.
+- **`message/send`** is JSON-RPC 2.0:
   ```json
   {"jsonrpc":"2.0","id":"1","method":"message/send",
    "params":{"message":{"kind":"message","role":"user","messageId":"<uuid>",
    "parts":[{"kind":"text","text":"<prompt>"}]}}}
   ```
-  The reply text is in `result.history[]` (role `agent`) and `result.artifacts[]`;
-  `result.status.state` is `completed` on success.
+  The reply text is in `result.history[]` (role `agent`) and `result.artifacts[]`; `result.status.state` is `completed` on success.
 
 ## Networking: who can reach the LLM?
 
-The hardest part is getting the **kagent pods** to reach the **host's Ollama**. The
-right host address differs per platform, so `scripts/35-llm-config.sh` derives a
-candidate set and **probes each from an in-cluster pod** (`GET /api/tags`), writing
-the first reachable one to `LLM_ENDPOINT` in `.env`.
+The hardest local piece is getting the **kagent pods** to reach the **host's Ollama**. The right host address differs per platform, so `scripts/35-llm-config.sh` derives a candidate set and **probes each from an in-cluster pod** (`GET /api/tags`), writing the first reachable one to `LLM_ENDPOINT` in `.env`.
 
 | Platform | Pod → host LLM route |
 |----------|----------------------|
 | Linux (native Docker Engine) | Kind docker-network gateway IP (`docker network inspect kind`, e.g. `172.18.0.1`) |
-| WSL2 / macOS (Docker Desktop) | Windows/VM host gateway `host.docker.internal` → `192.168.65.254` (IPv4); on WSL2 the stock dual-stack Ollama must be **bound to IPv4** (`OLLAMA_HOST=127.0.0.1`, applied by `make up`) — see the gotcha below |
+| WSL2 / macOS (Docker Desktop) | Host gateway `host.docker.internal` / Docker Desktop VM gateway; on WSL2 the stock dual-stack Ollama must be **bound to IPv4** (`OLLAMA_HOST=127.0.0.1`) |
 
-### ⚠️ Docker Desktop + WSL2 gotcha (important): stock Ollama is dual-stack
+### Docker Desktop + WSL2 gotcha: stock Ollama is dual-stack
 
-When Docker runs as **Docker Desktop on Windows with a WSL2 backend** (as opposed to
-native Docker Engine inside the WSL distro), Kind pods reach the host only through the
-**Windows host gateway `192.168.65.254`**, which lands on the **Windows IPv4 loopback**.
-WSL2's localhost mirror then forwards that loopback to your WSL services — **but only
-for IPv4-bound sockets**. Docker Desktop's default networking is **IPv4-only**.
+When Docker runs as **Docker Desktop on Windows with a WSL2 backend**, Kind pods reach the host through the Windows host gateway. WSL2's localhost mirror forwards that loopback to WSL services only for IPv4-bound sockets. Stock Ollama often binds dual-stack IPv6 (`[::]:11434`), which IPv4-only Kind pods cannot reach.
 
-Stock Ollama binds **dual-stack IPv6 `[::]:11434`** — `ss -ltn` shows it as `*:11434` —
-**even when you set `OLLAMA_HOST=0.0.0.0:11434`**. The WSL2 mirror does **not** forward
-that IPv6 socket, so the IPv4-only Kind pods cannot reach it.
+**Fix:** force Ollama onto an explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434`. `make ollama` / `make up` applies the systemd drop-in automatically when needed.
 
-**Symptom:** the A2A call succeeds at the wire level, but the agent's model call hangs
-or fails because the pod cannot open a connection to `192.168.65.254:11434`. A pod
-probe of `192.168.65.254:11434` returns `000`/timeout while `curl localhost:11434`
-works fine inside WSL.
-
-**Root cause (validated):**
-
-| Ollama bind | `ss` shows | Pod → `192.168.65.254:port` |
-|-------------|-----------|------------------------------|
-| `0.0.0.0:port` (true IPv4) | `0.0.0.0:port` | ✅ HTTP 200 |
-| `127.0.0.1:port` (IPv4 loopback) | `127.0.0.1:port` | ✅ HTTP 200 |
-| `0.0.0.0` *as Ollama interprets it* | `*:port` (dual-stack) | ❌ unreachable |
-| `[::]:port` (IPv6) | `[::]:port` / `*:port` | ❌ unreachable |
-
-**Fix (recommended — keeps the default port 11434): bind Ollama to IPv4.**
-Force Ollama onto an explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434`, which
-the WSL2 NAT-mode mirror *does* forward. For the systemd-managed Ollama, apply a
-drop-in once (this is exactly what `make ollama` / `make up` applies automatically,
-prompting for `sudo` when needed):
+To diagnose manually:
 
 ```bash
-sudo rm -f /etc/systemd/system/ollama.service.d/ipv4.conf
-sudo mkdir -p /etc/systemd/system/ollama.service.d && \
-printf '[Service]\nEnvironment="OLLAMA_HOST=127.0.0.1:11434"\n' \
-  | sudo tee /etc/systemd/system/ollama.service.d/zz-ipv4.conf && \
-sudo systemctl daemon-reload && sudo systemctl restart ollama
-```
-
-> **Drop-in ordering gotcha:** the stock installer (or a prior `systemctl edit
-> ollama`) often leaves an `override.conf` with `OLLAMA_HOST=0.0.0.0:11434`. systemd
-> merges `*.service.d/*.conf` **alphabetically** and the *last* assignment of a
-> variable wins, so a drop-in named `ipv4.conf` would be overridden by
-> `override.conf`. Name it `zz-ipv4.conf` (sorts last) so the IPv4 bind reliably
-> wins. Confirm with `systemctl show ollama -p Environment | tr ' ' '\n' | grep OLLAMA_HOST`.
-
-Afterwards `ss -ltn | grep 11434` should show `127.0.0.1:11434` (not `*:11434`).
-`127.0.0.1` is sufficient — only the WSL2 mirror (and through it the pods) needs to
-reach Ollama; n8n talks to the kagent NodePort, never to Ollama directly.
-`scripts/35-llm-config.sh` then re-probes pod→host reachability and proceeds.
-
-**What does NOT help:** switching Docker Desktop to dual IPv4/IPv6 *alone* (the WSL2
-NAT-mode mirror still won't forward the IPv6/localhost hop into WSL); the Docker
-Desktop "*.docker.internal in /etc/hosts" setting; restarting/reinstalling Ollama;
-rebooting; or `OLLAMA_HOST=0.0.0.0` (Ollama still binds dual-stack `[::]`).
-
-**No-Ollama-change alternative: WSL mirrored networking.** Switch WSL2 from its
-default NAT networking to **mirrored** mode, which shares the Windows network stack
-(localhost + IPv6) with your WSL distro, so the stock dual-stack Ollama becomes
-reachable via `host.docker.internal`:
-
-```ini
-# Windows: %UserProfile%\.wslconfig
-[wsl2]
-networkingMode=mirrored
-```
-
-Then from Windows run `wsl --shutdown`, restart, and `make up` again. Requires
-**Windows 11 22H2+ (build 22621.2359+)** and **Docker Desktop 4.19+**.
-
-**Fix (model placement, already automated):** `35-llm-config.sh` resolves the endpoint
-that pods can reach, and `ensure_model_on_local_ollama` **pulls the model onto the
-LOCAL WSL Ollama** (`127.0.0.1:11434`) via its REST API (`POST /api/pull`) — so the
-model exists exactly where the pods will look. If you switch `LLM_MODEL`, re-run
-`make llm-config` (or `make up`) so the new model is pulled to the right place.
-
-To diagnose manually, run a throwaway in-cluster probe:
-
-```bash
-kubectl --context kind-kagent-n8n run probe --rm -i --restart=Never \
+kubectl --context kind-kagent-copilot run probe --rm -i --restart=Never \
   --image=curlimages/curl -- \
   curl -s http://<candidate-ip>:11434/api/tags
 ```
 
-### n8n → kagent
+## Copilot Studio → kagent through Dev Tunnels
 
-The n8n container reaches the Kind-published NodePort through
-`host.docker.internal` thanks to `extra_hosts: ["host.docker.internal:host-gateway"]`
-in `n8n/docker-compose.yaml`. The imported A2A credential's `serverUrl` is rendered
-from `.env` at import time by `scripts/70-import-workflow.sh`.
+1. Confirm local kagent is healthy and exposed through the tunnel:
+   ```bash
+   make verify-a2a        # checks the card + message/send LOCALLY and via TUNNEL_URL
+   make status            # shows TUNNEL_URL, host-process state, and the card HTTP code via the tunnel
+   ```
+2. `make devtunnel` creates a **persistent named** tunnel (`TUNNEL_NAME`), forwards the A2A NodePort (`30883`), hosts it `--allow-anonymous` (Copilot Studio connects with Auth = None), resolves the public HTTPS URL, and writes it to `TUNNEL_URL` in `.env`. It runs **before** `kagent-install` so the agent card advertises the tunnel URL.
+3. The endpoint you give Copilot Studio is `https://<tunnel-host>/api/a2a/<namespace>/<agent>`.
+
+**Ordering matters:** the tunnel URL must exist before kagent install (it becomes `controller.a2aBaseUrl`). The persistent named tunnel gives a stable URL up front, so `make up` runs `devtunnel` before `kagent-install`.
+
+**Anti-phishing interstitial:** Dev Tunnels show an HTML interstitial only to browser `text/html` GETs. A2A traffic (JSON `GET`/`POST`) returns JSON directly. The scripts still send `X-Tunnel-Skip-AntiPhishing-Page: true` on tunnel checks as a belt-and-braces safety net.
+
+If Copilot Studio cannot connect: confirm the `devtunnel host` process is up (`make status` / `make logs TARGET=tunnel`), the URL includes the `/api/a2a/<namespace>/<agent>` path, and `make verify-a2a` still passes through the tunnel.
+
+## Copilot Studio host agent (Power Platform / `pac`)
+
+`make copilot` (`scripts/60-copilot-deploy.sh`) authenticates `pac` against `PAC_ENVIRONMENT_URL`, renders the committed A2A connector template (`copilot/connector/*.json`) to your tunnel host, deploys the host agent + connector packaged in `COPILOT_SOLUTION_NAME`, and runs `pac copilot publish`.
+
+- **You must be Published before testing.** An unpublished host agent throws a generic `SystemError` on every Test message and emits no A2A traffic. After Publish, delegation succeeds.
+- **Agent card must be A2A v0.3.** Copilot Studio's "Add agent → A2A agent" flow only accepts **v0.3** agent cards. kagent **0.9.7+** serves an A2A v1 card (adds a `supportedInterfaces` array with a `protocolVersion: "1.0"` entry) and the portal rejects it with *"This agent card uses A2A protocol v1, which is not supported yet. Please use an agent that provides a v0.3 agent card."* The demo pins **`KAGENT_VERSION=0.9.6`** (last pure-v0.3 release) in `scripts/40-kagent-install.sh`; with 0.9.6 the bind succeeds and name/description auto-populate. See [`copilot/README.md`](../copilot/README.md).
+- **`pac` connector/connection limits (validated live):** `pac connector` has **no delete**, and `pac connection delete` is **broken in default environments**. Teardown therefore deletes the **solution** (`pac solution delete`, removes host agent + connector) and removes the leftover connection via the **PowerApps API**. `make clean-copilot` / `make down` handle this.
+- **Streaming negotiation.** Because the agent card advertises `capabilities.streaming:false`, the live Copilot Studio runtime sends non-streaming `method:"message/send"` (JSON-RPC 2.0, `params.message.parts[].text`) even while sending `Accept: text/event-stream`. This matches what `make verify-a2a` sends — **kagent needs no wire changes**.
+- **Chat history.** Copilot Studio includes `contextId` + the full chat history under `metadata["copilotstudio.microsoft.com/a2a/chathistory"]`; kagent only reads the latest user message parts, so no kagent change is needed.
+
+## Verifying the cloud round-trip
+
+After deploying (`make copilot`), binding the A2A agent, and **Publishing**, send a prompt in the host agent's **Test** pane (`make demo` opens it). To confirm delegation actually reached kagent, watch its logs while you send the prompt — a fresh A2A `message/send` should appear:
+
+```bash
+make logs TARGET=agent
+make logs TARGET=tunnel
+```
 
 ## Small-model caveats
 
 Tiny CPU models are convenient but unreliable at structured/tool output:
 
 - **`qwen2.5:1.5b` (default, ~1GB):** reliably returns clean prose over A2A.
-- **`llama3.2:1b` (smaller, 1B):** often emits spurious function-call JSON
-  (e.g. `{"name":"…","parameters":{…}}`) instead of an answer. Use it only if you
-  need the absolute smallest footprint, and expect flaky replies.
-- Hosted OpenAI-compatible backends (set `LLM_PROVIDER=openai`/`azureOpenAI`) avoid
-  this entirely.
+- **`llama3.2:1b` (smaller, 1B):** often emits spurious function-call JSON instead of an answer.
+- Hosted OpenAI-compatible backends (set `LLM_PROVIDER=openai`/`azureOpenAI`) avoid this entirely.
 
 ## Common issues
 
 | Symptom | Fix |
 |---------|-----|
 | `model '<name>' not found (404)` from the agent | Re-run `make llm-config` to pull the model onto the pod-reachable endpoint |
-| n8n editor asks to **set up an owner account** | The owner is auto-provisioned by `make up` (n8n can't disable login; `N8N_USER_MANAGEMENT_DISABLED` is ignored in n8n 2.x). Sign in with `demo@example.com` / `DemoPassw0rd` (or your `N8N_OWNER_*` values in `.env`). If the wizard still shows, run `make n8n-up` to (re)provision, or it means a stale `n8n_data` volume — `make down` then `make up`. |
-| n8n shows the **"Customize n8n to you"** personalization popup | `make up` auto-dismisses it (submits the survey via the n8n API after provisioning the owner). If it still appears, run `make n8n-up` to re-apply, or dismiss it once in the UI. A stale `n8n_data` volume can also cause it — `make down` then `make up`. |
-| `make demo` prints no reply | Run `make status`; ensure the agent is `Ready` and the A2A card returns HTTP 200 |
-| A2A node missing in n8n | `make n8n-up` reinstalls `@agentic-layer/n8n-nodes-a2a` and restarts n8n |
-| Workflow not in editor | `make workflow` re-imports it (idempotent) |
-| Want to reset everything | `make down` then `make up` |
+| Local A2A card is not HTTP 200 | Run `make status`; ensure the Kind cluster exists and the Agent is Ready |
+| Copilot Studio gets connection errors | Check `make status` / `make logs TARGET=tunnel`; test the public agent-card URL with `curl` |
+| Copilot Studio Test throws `SystemError` | The host agent is not Published — click **Publish** in the maker portal (or re-run `make copilot`) |
+| Portal rejects the A2A agent as "protocol v1 / use v0.3" | kagent 0.9.7+ serves a v1 card — the demo pins `KAGENT_VERSION=0.9.6` (pure v0.3); re-run `make kagent-install` |
+| Test pane returns no kagent reply | Run `make verify-a2a`; confirm the A2A agent is bound and **Published** in the portal; inspect `make logs` |
+| Want to reset everything | `make down` (idempotent — removes cluster, tunnel, Copilot Studio footprint, Ollama), then `make up` |
 
 ## Handy commands
 
 ```bash
-make status                       # host / Ollama / Kind / kagent / n8n at a glance
-make logs                         # kagent controller + agent + n8n logs
-make open-ui                      # open the n8n editor + kagent UI in a browser
-kubectl --context kind-kagent-n8n -n kagent get agent,modelconfig
-curl -s http://localhost:30883/api/a2a/kagent/a2a-demo-agent/.well-known/agent-card.json | jq .
+make status
+make logs
+make demo
+kubectl --context kind-kagent-copilot -n kagent get agent,modelconfig
+curl -s http://localhost:30883/api/a2a/kagent/a2a-demo-agent/.well-known/agent-card.json
 
 # Open just the kagent UI manually (Ctrl-C to stop the forward):
-kubectl --context kind-kagent-n8n -n kagent port-forward svc/kagent-ui 8080:8080
+kubectl --context kind-kagent-copilot -n kagent port-forward svc/kagent-ui 8080:8080
 # then browse http://localhost:8080
 ```

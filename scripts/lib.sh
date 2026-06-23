@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# scripts/lib.sh — shared helpers + OS-detection layer for the kagent-n8n demo.
+# scripts/lib.sh — shared helpers + OS-detection layer for the kagent-copilot demo.
 #
 # Source this from every script:
 #     . "$(dirname "$0")/lib.sh"
@@ -12,6 +12,26 @@
 # Resolve repo root from this file's location (scripts/ -> repo root).
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export REPO_ROOT
+
+# --- PATH augmentation ----------------------------------------------------
+# Tools installed for the current user (dotnet global tools like `pac`, the
+# .NET host, devtunnel, Homebrew, ~/.local/bin) often live in dirs that are
+# only added to PATH by an interactive shell's profile. `make` runs recipes in
+# a NON-interactive bash that does not source those profiles, so `pac`/`dotnet`
+# can appear "missing" there. Prepend the standard locations (when present and
+# not already on PATH) so every script finds them regardless of how it's run.
+_prepend_path() {
+  case ":${PATH}:" in
+    *":$1:"*) : ;;                  # already present
+    *) [ -d "$1" ] && PATH="$1:${PATH}" ;;
+  esac
+}
+_prepend_path "$HOME/.dotnet/tools"   # dotnet global tools: pac
+_prepend_path "$HOME/.dotnet"         # dotnet host
+_prepend_path "$HOME/.local/bin"      # devtunnel, pipx, etc.
+_prepend_path "/home/linuxbrew/.linuxbrew/bin"
+[ -d /opt/homebrew/bin ] && _prepend_path "/opt/homebrew/bin"   # Apple Silicon brew
+export PATH
 
 # --- logging -------------------------------------------------------------
 _c() { [ -t 2 ] && printf '%s' "$1" || printf ''; }
@@ -89,7 +109,56 @@ ensure_env_file() {
   fi
 }
 
-# --- retry / wait --------------------------------------------------------
+# pac_env_url — echo the Dataverse environment URL to use with pac.
+# Prefers an explicit $PAC_ENVIRONMENT_URL; otherwise falls back to the active
+# pac auth profile's OrgUrl (requires an authenticated `pac` profile). Prints
+# nothing and returns non-zero when it cannot be determined.
+pac_env_url() {
+  if [ -n "${PAC_ENVIRONMENT_URL:-}" ]; then
+    printf '%s' "$PAC_ENVIRONMENT_URL"
+    return 0
+  fi
+  have_cmd pac || return 1
+  local url
+  url="$(pac org who --json 2>/dev/null | sed -n 's/.*"OrgUrl":"\([^"\\]*\)".*/\1/p' | head -1)"
+  [ -n "$url" ] || return 1
+  printf '%s' "$url"
+}
+
+# pac_env_id — echo the Power Platform environment id (used to build Copilot
+# Studio deep links). Prefers explicit env vars; otherwise derives it from the
+# active pac profile's EnvironmentId. The full id is returned verbatim — in
+# particular the default environment's "Default-" prefix is KEPT, because the
+# Copilot Studio URL uses the whole id. Prints nothing / returns non-zero when
+# it cannot be determined.
+pac_env_id() {
+  local id="${COPILOT_ENVIRONMENT_ID:-${POWER_PLATFORM_ENVIRONMENT_ID:-${PAC_ENVIRONMENT_ID:-}}}"
+  if [ -n "$id" ]; then
+    printf '%s' "$id"
+    return 0
+  fi
+  have_cmd pac || return 1
+  id="$(pac org who --json 2>/dev/null | sed -n 's/.*"EnvironmentId":"\([^"\\]*\)".*/\1/p' | head -1)"
+  [ -n "$id" ] || return 1
+  printf '%s' "$id"
+}
+
+# copilot_id — echo the deployed Copilot ID (GUID) for the host agent, matched
+# by its display name ($1, default $COPILOT_AGENT_DISPLAY_NAME) in the given
+# environment ($2, default $PAC_ENVIRONMENT_URL). `pac copilot list` exposes only
+# Name + Copilot ID (no schema name), and the Copilot ID column precedes the
+# Solution ID column, so the first GUID on the matching row is the one we want.
+# Prints nothing if not deployed / not resolvable.
+copilot_id() {
+  local name="${1:-${COPILOT_AGENT_DISPLAY_NAME:-}}" env="${2:-${PAC_ENVIRONMENT_URL:-}}"
+  [ -n "$name" ] || return 1
+  have_cmd pac || return 1
+  pac copilot list ${env:+--environment "$env"} 2>/dev/null \
+    | grep -F "$name" \
+    | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+    | head -1
+}
+
 # wait_for "description" timeout_seconds cmd [args...]
 # Retries cmd until it exits 0 or the timeout elapses.
 wait_for() {

@@ -13,7 +13,7 @@ ensure_env_file
 load_env
 
 require_cmd kubectl
-CLUSTER="${KIND_CLUSTER_NAME:-kagent-n8n}"
+CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 

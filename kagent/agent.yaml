@@ -6,8 +6,9 @@
 # (AGENT_NAME, AGENT_NAMESPACE, MODELCONFIG_NAME).
 #
 # A deliberately tool-less, conversational agent: it just answers over A2A,
-# which is the most reliable way to prove A2A communication (n8n is the client
-# in this demo, but any A2A-capable caller works) with a tiny local model.
+# which is the most reliable way to prove A2A communication (Microsoft Copilot
+# Studio is the host client/orchestrator in this demo, but any A2A-capable
+# caller works) with a tiny local model.
 # Swap in a richer LLM via .env to add tool use later.
 # ===========================================================================
 apiVersion: kagent.dev/v1alpha2
@@ -16,13 +17,17 @@ metadata:
   name: ${AGENT_NAME}
   namespace: ${AGENT_NAMESPACE}
 spec:
+  description: >-
+    Friendly kagent demo agent reachable over the A2A (Agent-to-Agent) protocol.
+    Greets callers and answers short questions, e.g. from a Microsoft Copilot
+    Studio host agent.
   declarative:
     runtime: python
     modelConfig: ${MODELCONFIG_NAME}
     systemMessage: |
       You are "A2A Demo Agent", a friendly assistant reachable over the A2A
-      (Agent-to-Agent) protocol by any A2A-capable client (for example an n8n
-      workflow, Microsoft Copilot Studio, or another agent).
+      (Agent-to-Agent) protocol by a Microsoft Copilot Studio host agent, or
+      another A2A-capable client.
 
       Keep replies short, warm and clear (1-3 sentences). When greeted, greet
       back and briefly state that you are a kagent agent answering over A2A. If

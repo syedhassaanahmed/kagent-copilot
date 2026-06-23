@@ -3,15 +3,19 @@
 # 99-teardown.sh — tear the demo down. Idempotent: missing pieces are skipped.
 #
 # Removes (in reverse order of creation):
-#   - n8n Docker Compose stack
+#   - local devtunnel host process, if this repo started one
 #   - Kind cluster (which removes kagent + all CRs)
-# Optionally stops Ollama / removes the model when called with flags.
+# Optionally removes cloud-side Copilot Studio / Dev Tunnel resources and stops
+# Ollama / removes the model when called with flags.
 #
 # Usage:
-#   99-teardown.sh                 # remove cluster + n8n (default)
+#   99-teardown.sh                 # stop local tunnel host + UI forward; remove Kind cluster
 #   99-teardown.sh --stop-ollama   # also stop the ollama serve we started
 #   99-teardown.sh --rm-model      # also remove the pulled model
-#   99-teardown.sh --all           # everything above
+#   99-teardown.sh --copilot       # also delete Copilot Studio solution/fallback parts
+#   99-teardown.sh --delete-tunnel # also delete the persistent named Dev Tunnel
+#   99-teardown.sh --all           # stop-ollama + rm-model + copilot + delete-tunnel
+#   99-teardown.sh --help          # print this usage
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -19,31 +23,407 @@ load_env
 
 STOP_OLLAMA=0
 RM_MODEL=0
+DELETE_COPILOT=0
+DELETE_TUNNEL=0
+SHOW_HELP=0
 for a in "$@"; do
   case "$a" in
     --stop-ollama) STOP_OLLAMA=1 ;;
     --rm-model)    RM_MODEL=1 ;;
-    --all)         STOP_OLLAMA=1; RM_MODEL=1 ;;
+    --copilot)     DELETE_COPILOT=1 ;;
+    --delete-tunnel) DELETE_TUNNEL=1 ;;
+    --all)         STOP_OLLAMA=1; RM_MODEL=1; DELETE_COPILOT=1; DELETE_TUNNEL=1 ;;
+    --help|-h)
+      SHOW_HELP=1
+      ;;
     *) warn "unknown flag: $a" ;;
   esac
 done
 
-CLUSTER="${KIND_CLUSTER_NAME:-kagent-n8n}"
-COMPOSE_FILE="$REPO_ROOT/n8n/docker-compose.yaml"
+if [ "$SHOW_HELP" = 1 ]; then
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
 
-# --- n8n compose stack ----------------------------------------------------
-if [ -f "$COMPOSE_FILE" ]; then
-  if docker compose -f "$COMPOSE_FILE" ps >/dev/null 2>&1; then
-    log "stopping n8n Docker Compose stack..."
-    docker compose -f "$COMPOSE_FILE" down -v || warn "compose down reported an issue"
-    ok "n8n stack removed"
+CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
+TUNNEL_NAME="${TUNNEL_NAME:-kagent-copilot-a2a}"
+PAC_ENVIRONMENT_URL="${PAC_ENVIRONMENT_URL:-}"
+COPILOT_AGENT_SCHEMA_NAME="${COPILOT_AGENT_SCHEMA_NAME:-kagent_a2a_host}"
+COPILOT_SOLUTION_NAME="${COPILOT_SOLUTION_NAME:-kagentcopilota2a}"
+CONNECTOR_DISPLAY_NAME="${COPILOT_CONNECTOR_DISPLAY_NAME:-kagent A2A Demo Agent}"
+COPILOT_CONNECTOR_API_NAME="${COPILOT_CONNECTOR_API_NAME:-}"
+
+print_connection_manual_hint() {
+  warn "manual fallback: Maker portal → Connections → delete the '${CONNECTOR_DISPLAY_NAME}' connection"
+}
+
+print_connector_manual_hint() {
+  warn "manual fallback: Maker portal → Custom connectors → delete '${CONNECTOR_DISPLAY_NAME}'"
+}
+
+stop_devtunnel_host() {
+  local pidfile pid
+  pidfile="$REPO_ROOT/.run/devtunnel-host.pid"
+  if [ ! -f "$pidfile" ]; then
+    log "no tracked devtunnel host pidfile — skipping local host stop"
+    return 0
   fi
+
+  pid="$(tr -d '[:space:]' < "$pidfile" || true)"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    log "stopping devtunnel host '${TUNNEL_NAME}' (pid ${pid})..."
+    kill "$pid" 2>/dev/null || true
+    rm -f "$pidfile"
+    ok "devtunnel host stopped"
+  else
+    warn "stale or invalid devtunnel host pidfile — removing"
+    rm -f "$pidfile"
+  fi
+}
+
+delete_devtunnel() {
+  if have_cmd devtunnel; then
+    log "deleting persistent devtunnel '${TUNNEL_NAME}'..."
+    devtunnel delete "$TUNNEL_NAME" --force || warn "could not delete devtunnel '${TUNNEL_NAME}'"
+  else
+    warn "devtunnel not installed — skipping persistent tunnel delete"
+  fi
+}
+
+pac_env_args=()
+if [ -n "$PAC_ENVIRONMENT_URL" ]; then
+  pac_env_args=(--environment "$PAC_ENVIRONMENT_URL")
+fi
+
+delete_powerapps_connection() {
+  if ! have_cmd python3; then
+    warn "python3 not installed — cannot call PowerApps API for connection cleanup"
+    print_connection_manual_hint
+    return 0
+  fi
+
+  # NOTE: pac connection delete is broken in default environments, so this uses
+  # the PowerApps API directly for the environment-level connection instance.
+  if ! PAC_ENVIRONMENT_URL="$PAC_ENVIRONMENT_URL" \
+       CONNECTOR_DISPLAY_NAME="$CONNECTOR_DISPLAY_NAME" \
+       COPILOT_CONNECTOR_API_NAME="$COPILOT_CONNECTOR_API_NAME" \
+       python3 <<'PY'
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+CACHE = Path.home() / ".local/share/Microsoft/PowerAppsCli/tokencache_msalv3.dat"
+CLIENT_ID = "9cee029c-6210-4654-90bb-17e6e9d36617"
+API_ROOT = "https://api.powerapps.com"
+AUDIENCES = ("https://service.powerapps.com/", "https://api.powerapps.com/")
+DISPLAY = os.environ.get("CONNECTOR_DISPLAY_NAME", "")
+API_NAME_HINT = os.environ.get("COPILOT_CONNECTOR_API_NAME", "")
+
+def fail(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+def load_cache():
+    if not CACHE.exists():
+        fail(f"pac/MSAL token cache not found: {CACHE}")
+    with CACHE.open(encoding="utf-8") as f:
+        return json.load(f)
+
+def values(cache, section):
+    data = cache.get(section, {})
+    return list(data.values()) if isinstance(data, dict) else []
+
+def tenant_from_cache(cache):
+    for acct in values(cache, "Account"):
+        realm = acct.get("realm") or ""
+        if realm:
+            return realm
+        home = acct.get("home_account_id") or ""
+        if "." in home:
+            return home.split(".", 1)[1]
+    for rt in values(cache, "RefreshToken"):
+        home = rt.get("home_account_id") or ""
+        if "." in home:
+            return home.split(".", 1)[1]
+    return ""
+
+def token_matches(entry, audience):
+    target = (entry.get("target") or "").lower()
+    return audience.lower().rstrip("/") in target
+
+def refresh(cache, audience, tenant):
+    if not tenant:
+        return ""
+    scope = audience.rstrip("/") + "/.default offline_access openid profile"
+    for rt in values(cache, "RefreshToken"):
+        secret = rt.get("secret") or rt.get("refresh_token") or ""
+        if not secret:
+            continue
+        data = urllib.parse.urlencode({
+            "client_id": CLIENT_ID,
+            "grant_type": "refresh_token",
+            "refresh_token": secret,
+            "scope": scope,
+        }).encode()
+        url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=30) as resp:
+                body = json.load(resp)
+            token = body.get("access_token") or ""
+            if token:
+                return token
+        except Exception:
+            continue
+    return ""
+
+def get_token(cache, audience):
+    now = int(time.time())
+    for at in values(cache, "AccessToken"):
+        if token_matches(at, audience) and int(at.get("expires_on") or "0") > now + 60:
+            return at.get("secret") or ""
+    return refresh(cache, audience, tenant_from_cache(cache))
+
+def request(method, url, token):
+    req = urllib.request.Request(url, method=method, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        if resp.status == 204:
+            return {}
+        raw = resp.read()
+        return json.loads(raw.decode() or "{}") if raw else {}
+
+def item_name(item):
+    name = item.get("name") or ""
+    return name.rsplit("/", 1)[-1]
+
+def item_display(item):
+    props = item.get("properties") or {}
+    return props.get("displayName") or props.get("connectionDisplayName") or item.get("displayName") or ""
+
+cache = load_cache()
+token = ""
+for audience in AUDIENCES:
+    token = get_token(cache, audience)
+    if token:
+        break
+if not token:
+    fail("no usable PowerApps access token found in pac/MSAL cache")
+
+tenant = tenant_from_cache(cache)
+env_name = os.environ.get("PAC_ENVIRONMENT_NAME") or os.environ.get("POWERAPPS_ENVIRONMENT_NAME") or (f"Default-{tenant}" if tenant else "")
+if not env_name:
+    fail("could not determine Power Platform environment name")
+flt = urllib.parse.quote(f"environment eq '{env_name}'", safe="")
+api_version = "2016-11-01"
+
+api_name = API_NAME_HINT
+if not api_name:
+    apis_url = f"{API_ROOT}/providers/Microsoft.PowerApps/apis?api-version={api_version}&$filter={flt}"
+    apis = request("GET", apis_url, token).get("value", [])
+    for api in apis:
+        if item_display(api) == DISPLAY:
+            api_name = item_name(api)
+            break
+if not api_name:
+    fail(f"could not find custom connector API for display name '{DISPLAY}'")
+
+encoded_api = urllib.parse.quote(api_name, safe="")
+conn_url = f"{API_ROOT}/providers/Microsoft.PowerApps/apis/{encoded_api}/connections?api-version={api_version}&$filter={flt}"
+connections = request("GET", conn_url, token).get("value", [])
+deleted = 0
+for conn in connections:
+    conn_id = item_name(conn)
+    if not conn_id:
+        continue
+    encoded_conn = urllib.parse.quote(conn_id, safe="")
+    delete_url = f"{API_ROOT}/providers/Microsoft.PowerApps/apis/{encoded_api}/connections/{encoded_conn}?api-version={api_version}&$filter={flt}"
+    try:
+        request("DELETE", delete_url, token)
+        deleted += 1
+        print(f"deleted PowerApps connection {conn_id} for API {api_name}")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            continue
+        raise
+if deleted == 0:
+    print(f"no PowerApps connections found for API {api_name} in {env_name}")
+PY
+  then
+    warn "PowerApps API connection cleanup failed"
+    print_connection_manual_hint
+  fi
+}
+
+find_connector_id() {
+  [ -n "$PAC_ENVIRONMENT_URL" ] || return 0
+  pac connector list --environment "$PAC_ENVIRONMENT_URL" 2>/dev/null \
+    | awk -v display="$CONNECTOR_DISPLAY_NAME" 'index($0, display) > 0 { print $1; exit }' || true
+}
+
+delete_dataverse_connector() {
+  local connector_id
+  connector_id="$(find_connector_id || true)"
+  if [ -z "$connector_id" ]; then
+    log "no fallback connector id found for '${CONNECTOR_DISPLAY_NAME}' — skipping Dataverse connector delete"
+    return 0
+  fi
+  if [ -z "$PAC_ENVIRONMENT_URL" ]; then
+    warn "PAC_ENVIRONMENT_URL not set — cannot call Dataverse Web API for connector cleanup"
+    print_connector_manual_hint
+    return 0
+  fi
+  if ! have_cmd python3; then
+    warn "python3 not installed — cannot call Dataverse Web API for connector cleanup"
+    print_connector_manual_hint
+    return 0
+  fi
+
+  # NOTE: pac connector has no delete command in pac 2.8.1; this fallback uses
+  # Dataverse Web API only if solution deletion did not remove the connector.
+  if ! PAC_ENVIRONMENT_URL="$PAC_ENVIRONMENT_URL" CONNECTOR_ID="$connector_id" python3 <<'PY'
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+CACHE = Path.home() / ".local/share/Microsoft/PowerAppsCli/tokencache_msalv3.dat"
+CLIENT_ID = "9cee029c-6210-4654-90bb-17e6e9d36617"
+ORG_URL = os.environ.get("PAC_ENVIRONMENT_URL", "").rstrip("/")
+CONNECTOR_ID = os.environ.get("CONNECTOR_ID", "")
+
+def fail(msg):
+    print(msg, file=sys.stderr)
+    sys.exit(1)
+
+def vals(cache, section):
+    data = cache.get(section, {})
+    return list(data.values()) if isinstance(data, dict) else []
+
+def tenant(cache):
+    for acct in vals(cache, "Account"):
+        if acct.get("realm"):
+            return acct["realm"]
+        home = acct.get("home_account_id") or ""
+        if "." in home:
+            return home.split(".", 1)[1]
+    return ""
+
+def refresh(cache, aud, tid):
+    if not tid:
+        return ""
+    data = None
+    scope = aud.rstrip("/") + "/.default offline_access openid profile"
+    for rt in vals(cache, "RefreshToken"):
+        secret = rt.get("secret") or rt.get("refresh_token") or ""
+        if not secret:
+            continue
+        data = urllib.parse.urlencode({
+            "client_id": CLIENT_ID,
+            "grant_type": "refresh_token",
+            "refresh_token": secret,
+            "scope": scope,
+        }).encode()
+        try:
+            with urllib.request.urlopen(urllib.request.Request(f"https://login.microsoftonline.com/{tid}/oauth2/v2.0/token", data=data), timeout=30) as resp:
+                token = json.load(resp).get("access_token") or ""
+                if token:
+                    return token
+        except Exception:
+            continue
+    return ""
+
+if not CACHE.exists():
+    fail(f"pac/MSAL token cache not found: {CACHE}")
+with CACHE.open(encoding="utf-8") as f:
+    cache = json.load(f)
+now = int(time.time())
+token = ""
+for at in vals(cache, "AccessToken"):
+    target = (at.get("target") or "").lower()
+    if ORG_URL.lower() in target and int(at.get("expires_on") or "0") > now + 60:
+        token = at.get("secret") or ""
+        break
+if not token:
+    token = refresh(cache, ORG_URL, tenant(cache))
+if not token:
+    fail("no usable Dataverse access token found in pac/MSAL cache")
+url = f"{ORG_URL}/api/data/v9.2/connectors({CONNECTOR_ID})"
+req = urllib.request.Request(url, method="DELETE", headers={
+    "Authorization": f"Bearer {token}",
+    "Accept": "application/json",
+    "OData-MaxVersion": "4.0",
+    "OData-Version": "4.0",
+})
+try:
+    with urllib.request.urlopen(req, timeout=45) as resp:
+        print(f"Dataverse connector delete returned HTTP {resp.status}")
+except urllib.error.HTTPError as e:
+    if e.code == 404:
+        print("Dataverse connector already absent")
+    else:
+        raise
+PY
+  then
+    warn "Dataverse Web API connector cleanup failed"
+    print_connector_manual_hint
+  fi
+}
+
+delete_copilot_studio() {
+  if ! have_cmd pac; then
+    warn "pac not installed — skipping Copilot Studio teardown"
+    print_connection_manual_hint
+    print_connector_manual_hint
+    return 0
+  fi
+
+  log "deleting Copilot Studio solution '${COPILOT_SOLUTION_NAME}'..."
+  pac solution delete "${pac_env_args[@]}" --solution-name "$COPILOT_SOLUTION_NAME" \
+    || warn "solution delete failed or solution was already absent: ${COPILOT_SOLUTION_NAME}"
+
+  delete_powerapps_connection
+
+  log "fallback deleting Copilot Studio agent '${COPILOT_AGENT_DISPLAY_NAME}' if still present..."
+  # pac resolves --bot by Copilot ID or schema name, but the schema name is not
+  # discoverable via `pac copilot list` and does not resolve reliably in pac
+  # 2.8.1, so look up the deployed Copilot ID (GUID) by display name. If the
+  # solution delete above already removed the agent, there is nothing to do.
+  local copilot_id
+  copilot_id="$(pac copilot list "${pac_env_args[@]}" 2>/dev/null \
+    | grep -F "$COPILOT_AGENT_DISPLAY_NAME" \
+    | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+    | head -1)"
+  if [ -n "$copilot_id" ]; then
+    pac copilot delete "${pac_env_args[@]}" --bot "$copilot_id" --confirm \
+      || warn "copilot fallback delete failed: ${COPILOT_AGENT_DISPLAY_NAME} (${copilot_id})"
+  else
+    ok "copilot agent already absent: ${COPILOT_AGENT_DISPLAY_NAME}"
+  fi
+  delete_dataverse_connector
+}
+
+# --- local devtunnel host (best-effort; does not delete persistent tunnel) ---
+stop_devtunnel_host
+
+if [ "$DELETE_TUNNEL" = 1 ]; then
+  delete_devtunnel
 else
-  log "no n8n compose file yet — skipping"
+  log "persistent devtunnel '${TUNNEL_NAME}' retained — pass --delete-tunnel or --all to delete it"
 fi
 
 # --- stray kagent UI port-forward (best-effort) ---------------------------
-# `make open-ui` may leave a background `kubectl port-forward svc/kagent-ui`.
+# `make demo` may leave a background `kubectl port-forward svc/kagent-ui`.
 # It would exit on its own once the cluster is gone, but clean it up proactively.
 if have_cmd pkill; then
   if pkill -f 'port-forward.*svc/kagent-ui' 2>/dev/null; then
@@ -55,8 +435,11 @@ fi
 if have_cmd kind; then
   if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
     log "deleting Kind cluster '${CLUSTER}'..."
-    kind delete cluster --name "$CLUSTER"
-    ok "Kind cluster '${CLUSTER}' deleted"
+    if kind delete cluster --name "$CLUSTER"; then
+      ok "Kind cluster '${CLUSTER}' deleted"
+    else
+      warn "could not delete Kind cluster '${CLUSTER}'"
+    fi
   else
     log "Kind cluster '${CLUSTER}' not present — skipping"
   fi
@@ -83,6 +466,11 @@ if [ "$STOP_OLLAMA" = 1 ]; then
   else
     warn "no tracked ollama process to stop (started outside this repo?)"
   fi
+fi
+
+# --- Copilot Studio / Power Platform (opt-in) ------------------------------
+if [ "$DELETE_COPILOT" = 1 ]; then
+  delete_copilot_studio
 fi
 
 ok "teardown complete"

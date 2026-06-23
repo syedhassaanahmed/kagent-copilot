@@ -1,0 +1,39 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "kagent A2A Demo Agent",
+    "description": "Demo agent for Microsoft Copilot Studio delegation to kagent over the A2A protocol.",
+    "version": "1.0"
+  },
+  "host": "__TUNNEL_HOST__",
+  "basePath": "/",
+  "schemes": [
+    "https"
+  ],
+  "consumes": [],
+  "produces": [],
+  "paths": {
+    "/api/a2a/__A2A_NAMESPACE__/__A2A_AGENT__": {
+      "post": {
+        "responses": {
+          "default": {
+            "description": "default",
+            "schema": {}
+          }
+        },
+        "x-ms-agentic-protocol": "a2a-1.0",
+        "x-ms-a2a-card-endpoint": "undefined",
+        "x-ms-a2a-card-json": "null\n",
+        "operationId": "InvokeA2A",
+        "tags": [
+          "A2A"
+        ],
+        "summary": "Invoke the kagent A2A demo agent",
+        "description": "Sends a non-streaming JSON-RPC 2.0 message/send request from Copilot Studio to the kagent A2A demo agent."
+      }
+    }
+  },
+  "parameters": {},
+  "responses": {},
+  "tags": []
+}
