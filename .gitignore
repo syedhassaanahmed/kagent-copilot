@@ -17,6 +17,13 @@ tmp/
 *.log
 *.tgz
 
+# Python bytecode caches (scripts/copilot_teardown.py)
+__pycache__/
+*.pyc
+
+# Runtime PID files (e.g. .ollama.pid written by scripts/20-ollama-up.sh)
+*.pid
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

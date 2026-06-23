@@ -30,6 +30,20 @@ resolve_tunnel_url() {
   fi
 }
 
+# retry <attempts> <delay-seconds> <cmd...> — run cmd until it succeeds. The Dev
+# Tunnels service is intermittently inconsistent and returns "Tunnel service
+# error: Not Found" for tunnels that demonstrably exist, so most operations need
+# a few attempts. Returns cmd's last exit status.
+retry() {
+  local attempts="$1" delay="$2"; shift 2
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if "$@"; then return 0; fi
+    [ "$i" -lt "$attempts" ] && sleep "$delay"
+  done
+  return 1
+}
+
 is_anonymous=false
 case "${TUNNEL_ALLOW_ANONYMOUS,,}" in
   true|1|yes|y) is_anonymous=true ;;
@@ -58,40 +72,92 @@ else
   fi
   devtunnel "${create_args[@]}"
   ok "devtunnel '${TUNNEL_NAME}' created"
+  # The Dev Tunnels service is eventually consistent: operations issued right
+  # after 'devtunnel create' can briefly fail with "Tunnel service error: Not
+  # Found" until the new tunnel propagates. Wait until it is queryable.
+  wait_for "devtunnel '${TUNNEL_NAME}' visible" 30 devtunnel show "$TUNNEL_NAME"
 fi
 
 # --- ensure A2A port exists -------------------------------------------------
-if devtunnel port list "$TUNNEL_NAME" 2>/dev/null | grep -Eq "(^|[^0-9])${NODEPORT}([^0-9]|$)"; then
-  ok "devtunnel port ${NODEPORT} already exists — skipping create"
+# Retry port creation to ride out the same propagation delay (and re-check the
+# port list each attempt so a partially-applied create is treated as success).
+ensure_port() {
+  local attempt
+  for attempt in $(seq 1 6); do
+    if devtunnel port list "$TUNNEL_NAME" 2>/dev/null \
+         | grep -Eq "(^|[^0-9])${NODEPORT}([^0-9]|$)"; then
+      return 0
+    fi
+    if devtunnel port create "$TUNNEL_NAME" -p "$NODEPORT" --protocol http; then
+      return 0
+    fi
+    log "devtunnel not ready for port ${NODEPORT} (attempt ${attempt}/6) — retrying in 3s..."
+    sleep 3
+  done
+  return 1
+}
+
+if ensure_port; then
+  ok "devtunnel port ${NODEPORT} ensured"
 else
-  log "creating devtunnel port ${NODEPORT}..."
-  devtunnel port create "$TUNNEL_NAME" -p "$NODEPORT" --protocol http
-  ok "devtunnel port ${NODEPORT} created"
+  die "could not create devtunnel port ${NODEPORT}; the tunnel service may be slow — re-run 'make devtunnel' or inspect 'devtunnel show ${TUNNEL_NAME}'"
 fi
 
 # --- ensure anonymous access ------------------------------------------------
 if [ "$is_anonymous" = true ]; then
-  devtunnel access create "$TUNNEL_NAME" --anonymous || true
-  ok "anonymous devtunnel access ensured"
+  if retry 5 3 devtunnel access create "$TUNNEL_NAME" --anonymous; then
+    ok "anonymous devtunnel access ensured"
+  else
+    warn "could not ensure anonymous devtunnel access after retries; set it manually if A2A clients get 401"
+  fi
 else
   warn "anonymous devtunnel access disabled by TUNNEL_ALLOW_ANONYMOUS=${TUNNEL_ALLOW_ANONYMOUS}"
 fi
 
 # --- host tunnel in background ---------------------------------------------
+# A single 'devtunnel host' attempt can die on the service's transient "Not
+# Found" before it connects — and before it logs the public URL (which uses an
+# auto-generated id and can ONLY be read from this output). Retry the host until
+# it reports readiness, truncating the log each attempt so readiness detection
+# only ever sees the current run.
 mkdir -p "$RUNDIR"
-if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-  ok "devtunnel host already running (pid $(cat "$PIDFILE")) — skipping start"
-else
-  log "starting devtunnel host '${TUNNEL_NAME}'..."
-  nohup devtunnel host "$TUNNEL_NAME" >"$LOGFILE" 2>&1 &
-  echo $! > "$PIDFILE"
-  ok "devtunnel host started (pid $(cat "$PIDFILE"), log ${LOGFILE})"
 
-  if ( wait_for "devtunnel host up" 30 bash -c "grep -Eq 'Connect via browser|Hosting port' '$LOGFILE'" ); then
-    :
-  else
-    warn "devtunnel host did not report readiness within 30s; check ${LOGFILE}"
-  fi
+host_running() {
+  [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null
+}
+
+host_log_ready() {
+  grep -Eq 'Ready to accept connections|Connect via browser|Hosting port' "$LOGFILE" 2>/dev/null
+}
+
+start_host_with_retry() {
+  local attempt pid s
+  for attempt in $(seq 1 8); do
+    : > "$LOGFILE"
+    nohup devtunnel host "$TUNNEL_NAME" >"$LOGFILE" 2>&1 &
+    pid=$!
+    echo "$pid" > "$PIDFILE"
+    for s in $(seq 1 20); do
+      if host_log_ready; then
+        ok "devtunnel host ready (pid ${pid}, log ${LOGFILE})"
+        return 0
+      fi
+      kill -0 "$pid" 2>/dev/null || break   # host exited early (transient error)
+      sleep 1
+    done
+    kill "$pid" 2>/dev/null || true
+    log "devtunnel host not ready (attempt ${attempt}/8) — service flaky, retrying in 3s..."
+    sleep 3
+  done
+  return 1
+}
+
+if host_running; then
+  ok "devtunnel host already running (pid $(cat "$PIDFILE")) — skipping start"
+elif start_host_with_retry; then
+  :
+else
+  warn "devtunnel host did not become ready after retries; check ${LOGFILE}"
 fi
 
 # --- resolve public URL -----------------------------------------------------
