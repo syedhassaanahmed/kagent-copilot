@@ -36,9 +36,20 @@ verify_base() {
   [ -n "$hdr" ] && hargs=(-H "$hdr")
 
   # --- 1. agent card ------------------------------------------------------
+  # Retry to ride out transient Dev Tunnel relay reconnects (the public host
+  # periodically drops/reconnects its WebSocket; a request landing in that window
+  # fails to connect and curl reports 000). Definitive HTTP errors are not retried.
   log "[${label}] GET ${card}"
-  local tmp="/tmp/a2a-card.$$.${label}" code
-  code="$(curl -s -o "$tmp" -w '%{http_code}' --max-time 15 "${hargs[@]}" "$card" || echo 000)"
+  local tmp="/tmp/a2a-card.$$.${label}" code attempt
+  for attempt in 1 2 3 4 5 6; do
+    code="$(curl -s -o "$tmp" -w '%{http_code}' --max-time 15 "${hargs[@]}" "$card")" || code="000"
+    case "$code" in
+      200) break ;;
+      000|502|503|504)
+        [ "$attempt" -lt 6 ] && { log "[${label}] agent card not ready (HTTP ${code}) attempt ${attempt}/6 — retrying in 3s..."; sleep 3; } ;;
+      *) break ;;  # definitive error (e.g. 404/401) — stop retrying
+    esac
+  done
   if [ "$code" != "200" ]; then
     cat "$tmp" 2>/dev/null; rm -f "$tmp"
     warn "[${label}] agent card not served (HTTP ${code})"
@@ -62,8 +73,17 @@ PY
 EOF
 
   log "[${label}] POST message/send -> ${base}/"
-  resp="$(curl -sL --max-time 180 -X POST -H 'Content-Type: application/json' "${hargs[@]}" -d "$req" "${base}/")" \
-    || { warn "[${label}] message/send request failed"; return 1; }
+  local post_attempt
+  resp=""
+  for post_attempt in 1 2 3; do
+    if resp="$(curl -sL --max-time 180 -X POST -H 'Content-Type: application/json' "${hargs[@]}" -d "$req" "${base}/")" && [ -n "$resp" ]; then
+      break
+    fi
+    [ "$post_attempt" -lt 3 ] && { log "[${label}] message/send got no response (attempt ${post_attempt}/3) — retrying in 3s..."; sleep 3; }
+  done
+  if [ -z "$resp" ]; then
+    warn "[${label}] message/send request failed (no response after retries)"; return 1
+  fi
 
   RESP="$resp" python3 <<'PY'
 import os,sys,json
