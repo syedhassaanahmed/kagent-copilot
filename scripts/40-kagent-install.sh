@@ -78,14 +78,38 @@ helm upgrade --install kagent "$KAGENT_CHART" \
   --set providers.default=ollama \
   --set controller.a2aBaseUrl="$A2A_BASE_URL" \
   ${disable_args[@]+"${disable_args[@]}"} \
-  --wait --timeout 10m
-ok "kagent installed"
+  --wait --timeout 10m && helm_rc=0 || helm_rc=$?
+if [ "${helm_rc:-0}" -eq 0 ]; then
+  ok "kagent installed"
+else
+  # The controller runs DB migrations on startup and crash-loops until the
+  # chart's PostgreSQL accepts connections. On a cold cluster that backoff can
+  # outlast helm's --wait window, marking the release 'failed' even though it
+  # recovers. Tolerate that here and reconcile readiness explicitly below.
+  warn "helm --wait did not converge (rc=${helm_rc}); the controller likely crash-looped waiting for PostgreSQL — reconciling readiness..."
+fi
 
 # --- wait for the controller deployment ----------------------------------
-CTRL_DEPLOY="$($K -n "$NS" get deploy -o name | grep -i controller | head -1 || true)"
+CTRL_DEPLOY="$($K -n "$NS" get deploy -o name | grep -i 'controller' | grep -viE 'kmcp|manager' | head -1 || true)"
 [ -n "$CTRL_DEPLOY" ] || die "could not find the kagent controller Deployment"
+
+# The controller can only finish its migrations once PostgreSQL is up, so wait
+# for postgres first to avoid chasing the controller's crash-loop backoff.
+PG_DEPLOY="$($K -n "$NS" get deploy -o name | grep -i postgres | head -1 || true)"
+if [ -n "$PG_DEPLOY" ]; then
+  log "waiting for ${PG_DEPLOY} rollout..."
+  $K -n "$NS" rollout status "$PG_DEPLOY" --timeout=300s || true
+fi
+
 log "waiting for ${CTRL_DEPLOY} rollout..."
-$K -n "$NS" rollout status "$CTRL_DEPLOY" --timeout=300s
+if ! $K -n "$NS" rollout status "$CTRL_DEPLOY" --timeout=600s; then
+  # Still not ready — likely stuck in crash-loop backoff from the cold-start race
+  # with PostgreSQL. Restart it to retry immediately instead of waiting out the
+  # exponential backoff.
+  warn "${CTRL_DEPLOY} not ready yet — restarting to clear crash-loop backoff..."
+  $K -n "$NS" rollout restart "$CTRL_DEPLOY"
+  $K -n "$NS" rollout status "$CTRL_DEPLOY" --timeout=300s
+fi
 ok "controller is ready"
 
 # --- deterministic NodePort for the A2A port -----------------------------
