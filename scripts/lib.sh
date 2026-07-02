@@ -188,6 +188,25 @@ wait_for() {
   ok "ready: ${desc}"
 }
 
+# retry <attempts> <delay-seconds> <cmd...> — run cmd until it exits 0, up to
+# <attempts> times, sleeping <delay> seconds between tries and logging a progress
+# note. Returns cmd's last exit status. Use for operations that fail transiently
+# on a healthy system (e.g. the eventually-consistent Dev Tunnels service). For
+# success conditions richer than "exit 0" (HTTP-code classes, log readiness,
+# process lifecycle) keep a purpose-built loop instead.
+retry() {
+  local attempts="$1" delay="$2"; shift 2
+  local i
+  for i in $(seq 1 "$attempts"); do
+    if "$@"; then return 0; fi
+    if [ "$i" -lt "$attempts" ]; then
+      log "retry: '$*' failed (attempt ${i}/${attempts}) — retrying in ${delay}s..."
+      sleep "$delay"
+    fi
+  done
+  return 1
+}
+
 # --- misc ----------------------------------------------------------------
 # require_cmd cmd [hint] — die with a helpful message if a command is missing.
 require_cmd() {

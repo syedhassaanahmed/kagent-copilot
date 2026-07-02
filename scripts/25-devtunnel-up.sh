@@ -32,20 +32,9 @@ resolve_tunnel_url() {
   fi
 }
 
-# retry <attempts> <delay-seconds> <cmd...> — run cmd until it succeeds. The Dev
-# Tunnels service is intermittently inconsistent and returns "Tunnel service
-# error: Not Found" for tunnels that demonstrably exist, so most operations need
-# a few attempts. Returns cmd's last exit status.
-retry() {
-  local attempts="$1" delay="$2"; shift 2
-  local i
-  for i in $(seq 1 "$attempts"); do
-    if "$@"; then return 0; fi
-    [ "$i" -lt "$attempts" ] && sleep "$delay"
-  done
-  return 1
-}
-
+# retry() lives in lib.sh (shared). The Dev Tunnels service is eventually
+# consistent and returns "Tunnel service error: Not Found" for tunnels that
+# demonstrably exist, so several operations below wrap their call in retry().
 is_anonymous=false
 case "${TUNNEL_ALLOW_ANONYMOUS,,}" in
   true|1|yes|y) is_anonymous=true ;;
@@ -83,23 +72,13 @@ fi
 # --- ensure A2A port exists -------------------------------------------------
 # Retry port creation to ride out the same propagation delay (and re-check the
 # port list each attempt so a partially-applied create is treated as success).
-ensure_port() {
-  local attempt
-  for attempt in $(seq 1 6); do
-    if devtunnel port list "$TUNNEL_NAME" 2>/dev/null \
-         | grep -Eq "(^|[^0-9])${NODEPORT}([^0-9]|$)"; then
-      return 0
-    fi
-    if devtunnel port create "$TUNNEL_NAME" -p "$NODEPORT" --protocol http; then
-      return 0
-    fi
-    log "devtunnel not ready for port ${NODEPORT} (attempt ${attempt}/6) — retrying in 3s..."
-    sleep 3
-  done
-  return 1
+ensure_port_once() {
+  devtunnel port list "$TUNNEL_NAME" 2>/dev/null \
+    | grep -Eq "(^|[^0-9])${NODEPORT}([^0-9]|$)" && return 0
+  devtunnel port create "$TUNNEL_NAME" -p "$NODEPORT" --protocol http
 }
 
-if ensure_port; then
+if retry 6 3 ensure_port_once; then
   ok "devtunnel port ${NODEPORT} ensured"
 else
   die "could not create devtunnel port ${NODEPORT}; the tunnel service may be slow — re-run 'make devtunnel' or inspect 'devtunnel show ${TUNNEL_NAME}'"
