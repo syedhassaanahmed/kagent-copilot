@@ -10,7 +10,7 @@ load_env
 CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
-NS="${KAGENT_NAMESPACE:-kagent}"
+NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
 
@@ -43,7 +43,7 @@ hr; log "kagent (namespace ${NS})"
 if $K get ns "$NS" >/dev/null 2>&1; then
   $K -n "$NS" get agent "$AGENT" 2>/dev/null | sed 's/^/  /' || printf '  agent %s not found\n' "$AGENT"
   $K -n "$NS" get modelconfig a2a-demo-modelconfig 2>/dev/null | sed 's/^/  /' || true
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${NODEPORT}/api/a2a/${NS}/${AGENT}/.well-known/agent-card.json" 2>/dev/null || echo 000)"
+  code="$(http_code "http://localhost:${NODEPORT}/api/a2a/${NS}/${AGENT}/.well-known/agent-card.json" --max-time 5)"
   printf '  A2A card    : http://localhost:%s/api/a2a/%s/%s/.well-known/agent-card.json (HTTP %s)\n' "$NODEPORT" "$NS" "$AGENT" "$code"
 else
   printf '  not installed\n'
@@ -60,9 +60,8 @@ fi
 printf '  tunnel name : %s\n' "$TUNNEL_NAME"
 if [ -n "${TUNNEL_URL:-}" ]; then
   printf '  TUNNEL_URL  : %s\n' "$TUNNEL_URL"
-  tcode="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 \
-    -H 'X-Tunnel-Skip-AntiPhishing-Page: true' \
-    "${TUNNEL_URL%/}/api/a2a/${NS}/${AGENT}/.well-known/agent-card.json" 2>/dev/null || echo 000)"
+  tcode="$(http_code "${TUNNEL_URL%/}/api/a2a/${NS}/${AGENT}/.well-known/agent-card.json" \
+    --max-time 8 -H 'X-Tunnel-Skip-AntiPhishing-Page: true')"
   printf '  card (tunnel): %s/api/a2a/%s/%s/.well-known/agent-card.json (HTTP %s)\n' "${TUNNEL_URL%/}" "$NS" "$AGENT" "$tcode"
 else
   printf '  TUNNEL_URL  : not set (run 25-devtunnel-up.sh)\n'

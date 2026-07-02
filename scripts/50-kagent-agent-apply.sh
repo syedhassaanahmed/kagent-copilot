@@ -17,7 +17,7 @@ CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 
-NS="${AGENT_NAMESPACE:-kagent}"
+NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
 PROVIDER="${LLM_PROVIDER:-ollama}"
 MODEL="${LLM_MODEL:-qwen2.5:1.5b}"

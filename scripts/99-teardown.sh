@@ -113,12 +113,6 @@ delete_powerapps_connection() {
   fi
 }
 
-find_connector_id() {
-  [ -n "$PAC_ENVIRONMENT_URL" ] || return 0
-  pac connector list --environment "$PAC_ENVIRONMENT_URL" 2>/dev/null \
-    | awk -v display="$CONNECTOR_DISPLAY_NAME" 'index($0, display) > 0 { print $1; exit }' || true
-}
-
 delete_dataverse_connector() {
   local connector_id
   connector_id="$(find_connector_id || true)"
@@ -162,18 +156,15 @@ delete_copilot_studio() {
   delete_powerapps_connection
 
   log "fallback deleting Copilot Studio agent '${COPILOT_AGENT_DISPLAY_NAME}' if still present..."
-  # pac resolves --bot by Copilot ID or schema name, but the schema name is not
-  # discoverable via `pac copilot list` and does not resolve reliably in pac
-  # 2.8.1, so look up the deployed Copilot ID (GUID) by display name. If the
-  # solution delete above already removed the agent, there is nothing to do.
-  local copilot_id
-  copilot_id="$( { pac copilot list "${pac_env_args[@]}" 2>/dev/null \
-    | grep -F "$COPILOT_AGENT_DISPLAY_NAME" \
-    | grep -oiE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
-    | head -1; } || true)"
-  if [ -n "$copilot_id" ]; then
-    pac copilot delete "${pac_env_args[@]}" --bot "$copilot_id" --confirm \
-      || warn "copilot fallback delete failed: ${COPILOT_AGENT_DISPLAY_NAME} (${copilot_id})"
+  # Resolve the deployed Copilot ID (GUID) by display name via lib.sh's shared
+  # copilot_id(); pac --bot needs the GUID (the schema name is not discoverable
+  # via `pac copilot list` in pac 2.8.1). If the solution delete above already
+  # removed the agent, copilot_id() returns nothing and there is nothing to do.
+  local cid
+  cid="$(copilot_id "$COPILOT_AGENT_DISPLAY_NAME" "$PAC_ENVIRONMENT_URL" || true)"
+  if [ -n "$cid" ]; then
+    pac copilot delete "${pac_env_args[@]}" --bot "$cid" --confirm \
+      || warn "copilot fallback delete failed: ${COPILOT_AGENT_DISPLAY_NAME} (${cid})"
   else
     ok "copilot agent already absent: ${COPILOT_AGENT_DISPLAY_NAME}"
   fi

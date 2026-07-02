@@ -10,17 +10,16 @@ load_env
 
 CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
-KAGENT_NS="${KAGENT_NAMESPACE:-kagent}"
+NS="$(kagent_namespace)"
 KAGENT_UI_PORT="${KAGENT_UI_PORT:-8080}"
 KAGENT_UI_URL="http://localhost:${KAGENT_UI_PORT}"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
-AGENT_NS="${AGENT_NAMESPACE:-kagent}"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
-A2A_URL="http://localhost:${NODEPORT}/api/a2a/${AGENT_NS}/${AGENT}"
+A2A_URL="http://localhost:${NODEPORT}/api/a2a/${NS}/${AGENT}"
 COPILOT_STUDIO_URL="${COPILOT_STUDIO_URL:-https://copilotstudio.microsoft.com/}"
 COPILOT_AGENT_DISPLAY_NAME="${COPILOT_AGENT_DISPLAY_NAME:-kagent A2A Host}"
 PAC_ENVIRONMENT_URL="${PAC_ENVIRONMENT_URL:-$(pac_env_url 2>/dev/null || true)}"
-PUBLIC_A2A_URL="${TUNNEL_URL:+${TUNNEL_URL%/}/api/a2a/${AGENT_NS}/${AGENT}}"
+PUBLIC_A2A_URL="${TUNNEL_URL:+${TUNNEL_URL%/}/api/a2a/${NS}/${AGENT}}"
 TEST_PROMPT="${TEST_PROMPT:-Ask the kagent agent to introduce itself and name the protocol you are talking over.}"
 
 open_url() {
@@ -40,7 +39,7 @@ open_url() {
 }
 
 ui_reachable() {
-  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$KAGENT_UI_URL/" 2>/dev/null || echo 000)" = "200" ]
+  [ "$(http_code "$KAGENT_UI_URL/" --max-time 3)" = "200" ]
 }
 
 print_binding_steps() {
@@ -68,13 +67,13 @@ ensure_kagent_ui_forward() {
     return 0
   fi
   have_cmd kubectl || { warn "kubectl not found — skipping kagent UI (open it manually with port-forward)"; return 1; }
-  kubectl --context "$CTX" -n "$KAGENT_NS" get svc kagent-ui >/dev/null 2>&1 || {
+  kubectl --context "$CTX" -n "$NS" get svc kagent-ui >/dev/null 2>&1 || {
     warn "kagent UI service not found in context ${CTX} — is the cluster up? skipping"; return 1; }
 
   mkdir -p "$REPO_ROOT/.tmp"
   local logf="$REPO_ROOT/.tmp/kagent-ui-portforward.log"
   log "starting background port-forward for the kagent UI (svc/kagent-ui ${KAGENT_UI_PORT}:8080)..."
-  setsid kubectl --context "$CTX" -n "$KAGENT_NS" \
+  setsid kubectl --context "$CTX" -n "$NS" \
     port-forward "svc/kagent-ui" "${KAGENT_UI_PORT}:8080" >"$logf" 2>&1 &
   local i
   for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -105,7 +104,7 @@ log "Local kagent A2A endpoint:"
 printf '\n    %s\n\n' "$A2A_URL"
 if [ -n "${TUNNEL_URL:-}" ]; then
   log "Public A2A endpoint (give this to Copilot Studio):"
-  printf '\n    %s\n\n' "${TUNNEL_URL%/}/api/a2a/${AGENT_NS}/${AGENT}"
+  printf '\n    %s\n\n' "${TUNNEL_URL%/}/api/a2a/${NS}/${AGENT}"
 else
   log "Expose that endpoint with Microsoft Dev Tunnels (make devtunnel) for Copilot Studio cloud access."
 fi

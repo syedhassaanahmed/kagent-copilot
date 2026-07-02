@@ -19,7 +19,7 @@ require_cmd kubectl
 CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
-NS="${KAGENT_NAMESPACE:-kagent}"
+NS="$(kagent_namespace)"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
 # Pinned to 0.9.6 — the last kagent release that serves a pure A2A v0.3 agent card.
 # kagent 0.9.7+ (commit "Migrate from A2A v0 to v1") adds a `supportedInterfaces`
@@ -152,7 +152,7 @@ ok "A2A NodePort service applied"
 # No agent exists yet, so any HTTP response (even 404) proves the port is live.
 if wait_for "A2A NodePort on host :${NODEPORT}" 60 bash -c \
      "curl -s -o /dev/null --max-time 5 http://localhost:${NODEPORT}/ && true"; then
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${NODEPORT}/" || echo 000)"
+  code="$(http_code "http://localhost:${NODEPORT}/" --max-time 5)"
   ok "A2A NodePort reachable from host (HTTP ${code})"
 fi
 

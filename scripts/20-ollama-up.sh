@@ -79,22 +79,8 @@ apply_ipv4_dropin() {
 }
 
 instruct_ipv4_and_die() {
-  local dropdir=/etc/systemd/system/ollama.service.d
-  die "Ollama on :${PORT} is bound dual-stack/IPv6 ('*:${PORT}') — IPv4-only Kind
-  pods cannot reach it through the WSL2 NAT-mode mirror.
-
-  Apply the IPv4 bind once (keeps the default port ${PORT}), then re-run 'make up'.
-  Note: the drop-in is named 'zz-ipv4.conf' so it overrides any existing
-  override.conf (systemd merges *.d files alphabetically; last wins):
-
-    sudo rm -f ${dropdir}/ipv4.conf; \\
-    sudo mkdir -p ${dropdir} && \\
-    printf '[Service]\\nEnvironment=\"OLLAMA_HOST=127.0.0.1:${PORT}\"\\n' \\
-      | sudo tee ${dropdir}/zz-ipv4.conf && \\
-    sudo systemctl daemon-reload && sudo systemctl restart ollama
-
-  Verify with: ss -ltn | grep ${PORT}   (expect 127.0.0.1:${PORT}, not *:${PORT})
-  (No-Ollama-change alternative: WSL mirrored networking — see docs/troubleshooting.md.)"
+  print_ipv4_fix_hint "$PORT"
+  die "Ollama on :${PORT} is not reachable from IPv4-only Kind pods (apply the IPv4 fix above, then re-run 'make up')."
 }
 
 ensure_ipv4() {

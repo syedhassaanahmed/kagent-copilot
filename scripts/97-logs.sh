@@ -13,7 +13,7 @@ load_env
 CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
-NS="${KAGENT_NAMESPACE:-kagent}"
+NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
 
 FOLLOW=""

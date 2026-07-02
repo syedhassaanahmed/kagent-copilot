@@ -159,6 +159,19 @@ copilot_id() {
     | head -1
 }
 
+# find_connector_id [display] [env] — echo the custom-connector id whose
+# `pac connector list` row contains the display name ($1, default
+# $CONNECTOR_DISPLAY_NAME) in the environment ($2, default $PAC_ENVIRONMENT_URL).
+# Prints nothing when pac/env is unavailable or no match is found. Shared by
+# 60-copilot-deploy.sh (upsert) and 99-teardown.sh (cleanup).
+find_connector_id() {
+  local display="${1:-${CONNECTOR_DISPLAY_NAME:-}}" env="${2:-${PAC_ENVIRONMENT_URL:-}}"
+  [ -n "$env" ] || return 0
+  have_cmd pac || return 0
+  pac connector list --environment "$env" 2>/dev/null \
+    | awk -v display="$display" 'index($0, display) > 0 { print $1; exit }' || true
+}
+
 # wait_for "description" timeout_seconds cmd [args...]
 # Retries cmd until it exits 0 or the timeout elapses.
 wait_for() {
@@ -179,4 +192,50 @@ wait_for() {
 # require_cmd cmd [hint] — die with a helpful message if a command is missing.
 require_cmd() {
   have_cmd "$1" || die "required command not found: $1${2:+ ($2)}"
+}
+
+# kagent_namespace — the single Kubernetes namespace that hosts kagent AND the
+# demo Agent. KAGENT_NAMESPACE is canonical; AGENT_NAMESPACE is accepted as a
+# legacy alias for existing .env files. Every script resolves the namespace
+# through this helper so the two can never drift apart.
+kagent_namespace() {
+  printf '%s' "${KAGENT_NAMESPACE:-${AGENT_NAMESPACE:-kagent}}"
+}
+
+# http_code URL [extra curl args...] — echo the HTTP status of a request to URL
+# (000 when unreachable). curl's own '%{http_code}' write-out already yields 000
+# on failure, so no '|| echo 000' doubling is needed. Pass per-call flags such as
+# --max-time or -H after the URL.
+http_code() {
+  local url="$1"; shift
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' "$@" "$url" 2>/dev/null)" || true
+  printf '%s' "${code:-000}"
+}
+
+# print_ipv4_fix_hint [port] — explain (to stderr) why a dual-stack/IPv6 Ollama is
+# unreachable from IPv4-only Kind pods on Docker Desktop + WSL2, and print the
+# one-time systemd drop-in that binds Ollama to IPv4. Shared by 20-ollama-up.sh
+# and 35-llm-config.sh so the recipe lives in exactly one place.
+print_ipv4_fix_hint() {
+  local port="${1:-${OLLAMA_PORT:-11434}}"
+  local dropdir=/etc/systemd/system/ollama.service.d
+  cat >&2 <<EOF
+Ollama on :${port} is bound dual-stack/IPv6 ('*:${port}') — IPv4-only Kind pods
+cannot reach it through the WSL2 NAT-mode mirror. Bind Ollama to IPv4 once (keeps
+the default port ${port}), then re-run 'make up'. The drop-in is named
+'zz-ipv4.conf' so it overrides any existing override.conf (systemd merges *.d
+files alphabetically; the last assignment wins):
+
+    sudo rm -f ${dropdir}/ipv4.conf; \\
+    sudo mkdir -p ${dropdir} && \\
+    printf '[Service]\\nEnvironment="OLLAMA_HOST=127.0.0.1:${port}"\\n' \\
+      | sudo tee ${dropdir}/zz-ipv4.conf && \\
+    sudo systemctl daemon-reload && sudo systemctl restart ollama
+
+Verify with: ss -ltn | grep ${port}   (expect 127.0.0.1:${port}, not *:${port})
+Note: OLLAMA_HOST=0.0.0.0 is NOT enough — Ollama still binds dual-stack; the fix
+must pin an explicit IPv4 address (127.0.0.1).
+(No-Ollama-change alternative: WSL mirrored networking — see docs/troubleshooting.md.)
+EOF
 }

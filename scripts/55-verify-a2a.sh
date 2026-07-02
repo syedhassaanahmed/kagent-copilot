@@ -22,7 +22,7 @@ load_env
 require_cmd curl
 require_cmd python3
 
-NS="${AGENT_NAMESPACE:-kagent}"
+NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
 NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
 PROMPT="${1:-In one friendly sentence, introduce yourself and name the protocol we are communicating over.}"

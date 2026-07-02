@@ -26,7 +26,7 @@ fi
 [ -n "$PAC_ENVIRONMENT_URL" ] || die "PAC_ENVIRONMENT_URL is empty and no active pac profile found — set it in .env (see 'pac org list') or run 'pac auth create --url <env-url>'"
 [ -n "$TUNNEL_URL" ] || die "TUNNEL_URL is empty — run 25-devtunnel-up.sh first (need the public tunnel host for the connector)"
 
-AGENT_NAMESPACE="${AGENT_NAMESPACE:-${KAGENT_NAMESPACE:-kagent}}"
+AGENT_NAMESPACE="$(kagent_namespace)"
 AGENT_NAME="${AGENT_NAME:-a2a-demo-agent}"
 COPILOT_AGENT_DISPLAY_NAME="${COPILOT_AGENT_DISPLAY_NAME:-kagent A2A Host}"
 COPILOT_AGENT_SCHEMA_NAME="${COPILOT_AGENT_SCHEMA_NAME:-kagent_a2a_host}"
@@ -84,11 +84,6 @@ render_connector() {
       "$REPO_ROOT/copilot/connector/apiDefinition.json" > "$api_def"
 
   ok "rendered connector host=${TUNNEL_HOST} path=/api/a2a/${AGENT_NAMESPACE}/${AGENT_NAME}"
-}
-
-find_connector_id() {
-  pac connector list --environment "$PAC_ENVIRONMENT_URL" 2>/dev/null \
-    | awk -v display="$CONNECTOR_DISPLAY_NAME" 'index($0, display) > 0 { print $1; exit }'
 }
 
 upsert_connector() {
