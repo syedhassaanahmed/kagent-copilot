@@ -22,8 +22,6 @@
           }
         },
         "x-ms-agentic-protocol": "a2a-1.0",
-        "x-ms-a2a-card-endpoint": "undefined",
-        "x-ms-a2a-card-json": "null\n",
         "operationId": "InvokeA2A",
         "tags": [
           "A2A"
