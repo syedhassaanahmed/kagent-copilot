@@ -118,13 +118,9 @@ CTRL_SVC="$($K -n "$NS" get svc -o name | grep -i controller | grep -vi metrics 
 SELECTOR_JSON="$($K -n "$NS" get "$CTRL_SVC" -o jsonpath='{.spec.selector}')"
 log "controller service ${CTRL_SVC} selector: ${SELECTOR_JSON}"
 
-# Build selector YAML lines from the controller's selector map.
-selector_yaml="$(python3 - "$SELECTOR_JSON" <<'PY'
-import json,sys
-sel=json.loads(sys.argv[1])
-print("\n".join(f"    {k}: {v}" for k,v in sel.items()))
-PY
-)"
+# Build 4-space-indented selector YAML lines from the controller's selector map,
+# rendered natively by kubectl (no python needed for this transform).
+selector_yaml="$($K -n "$NS" get "$CTRL_SVC" -o go-template='{{range $k, $v := .spec.selector}}{{printf "    %s: %s\n" $k $v}}{{end}}')"
 
 log "applying deterministic A2A NodePort service (nodePort ${NODEPORT} -> 8083)..."
 cat <<EOF | $K -n "$NS" apply -f -

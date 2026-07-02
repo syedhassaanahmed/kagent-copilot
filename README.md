@@ -24,7 +24,7 @@ Demonstrates a **Microsoft Copilot Studio agent** (cloud A2A client / orchestrat
 
 - A Unix-like host: **Linux, WSL2, or macOS** (Intel or Apple Silicon).
 - **Docker** (Engine on Linux/WSL2, Docker Desktop on macOS) running.
-- `make`, `bash`, `curl`. The remaining CLIs are installed idempotently by `make tools`:
+- `make`, `bash`, `curl`, and **`python3`** (stdlib only — used by `make verify-a2a` for A2A JSON parsing and by `make down`/`make clean-copilot` teardown; assumed present, not installed by `make tools`). The remaining CLIs are installed idempotently by `make tools`:
   `kubectl`, `kind`, `helm`, `ollama`, **`devtunnel`** (Microsoft Dev Tunnels), and **`pac`** (Power Platform CLI). `pac` needs the **.NET SDK** (8+) plus two native packages on Linux/WSL2: **`libicu`** (ICU, for .NET globalization) and **`xdg-utils`** (provides `xdg-open` for browser-based `pac auth`). On Debian/Ubuntu: `sudo apt-get install -y libicu-dev xdg-utils`.
 - A **Microsoft Dev Tunnels** login (`devtunnel user login`, one-time).
 - A signed-in **`pac`** profile (`pac auth create --url <env-url>`; `make copilot` will prompt if none exists). An active profile is also what lets `PAC_ENVIRONMENT_URL` auto-resolve.

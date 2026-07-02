@@ -18,10 +18,13 @@ esac
 
 # --- baseline commands ----------------------------------------------------
 # These must exist now; kubectl/kind/helm/ollama are installed by 'make tools'.
-for c in docker curl bash; do
+# python3 (stdlib only) is a prerequisite too — verify-a2a parses the A2A JSON
+# with it and the teardown helper uses it — but it is assumed present, not
+# auto-installed by 'make tools'.
+for c in docker curl bash python3; do
   require_cmd "$c"
 done
-ok "baseline commands present: docker, curl, bash"
+ok "baseline commands present: docker, curl, bash, python3"
 
 # --- docker runtime -------------------------------------------------------
 if ! docker info >/dev/null 2>&1; then
