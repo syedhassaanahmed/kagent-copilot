@@ -56,42 +56,6 @@ flowchart LR
 
 > Copilot Studio never talks to the LLM directly. All inference happens inside the kagent agent through its `ModelConfig`.
 
-## Repository Layout
-
-```text
-kagent-copilot/
-├── Makefile
-├── README.md
-├── .env.example
-├── scripts/
-│   ├── lib.sh
-│   ├── 00-preflight.sh            # + devtunnel/pac + login checks
-│   ├── 10-install-tools.sh       # + devtunnel, pac installers
-│   ├── 20-ollama-up.sh
-│   ├── 25-devtunnel-up.sh        # NEW: persistent Dev Tunnel, resolves TUNNEL_URL
-│   ├── 30-kind-up.sh
-│   ├── 35-llm-config.sh
-│   ├── 40-kagent-install.sh      # a2aBaseUrl = TUNNEL_URL
-│   ├── 50-kagent-agent-apply.sh
-│   ├── 55-verify-a2a.sh          # local + tunnel passes
-│   ├── 60-copilot-deploy.sh      # NEW: deploy + publish host agent + connector (pac)
-│   ├── 95-open-ui.sh             # `make demo`: kagent UI + Copilot Studio maker portal + bind steps
-│   ├── 97-logs.sh                # kagent | agent | tunnel
-│   ├── 98-status.sh              # + Dev Tunnel + Power Platform auth
-│   └── 99-teardown.sh            # + tunnel host stop, --copilot, --delete-tunnel, --all
-├── kind/
-│   └── cluster.yaml
-├── kagent/
-│   └── agent.yaml                # system message references Copilot Studio
-├── copilot/                      # NEW: Copilot Studio host-agent + A2A connector templates
-│   ├── agent/instructions.md
-│   ├── connector/apiDefinition.json
-│   ├── connector/apiProperties.json
-│   └── README.md
-└── docs/
-    └── troubleshooting.md
-```
-
 ## Implementation Tasks
 
 1. [x] **scaffold** — established the `kagent-copilot` project layout (cluster, env vars, docs) with stable `AGENT_NAME` and namespaces.
