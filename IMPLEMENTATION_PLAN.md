@@ -13,13 +13,15 @@ The kagent agent is powered by a **pluggable LLM backend**: the demo starts with
 | # | Assumption | Status | Note |
 |---|------------|--------|------|
 | 1 | kagent natively exposes agents over A2A | ✅ Validated | A2A endpoint on controller port `8083`, path `/api/a2a/{namespace}/{agent}` |
-| 2 | kagent supports pluggable LLM providers | ✅ Validated | `ModelConfig` supports Ollama, OpenAI, AzureOpenAI, Anthropic, Gemini |
+| 2 | kagent supports pluggable LLM providers | ✅ Validated | kagent's `ModelConfig` supports Ollama, OpenAI, AzureOpenAI, Anthropic, Gemini; **this repo wires and validates Ollama, OpenAI, AzureOpenAI only** (others are rejected by `35-llm-config.sh`) |
 | 3 | kagent installs via Helm OCI chart + CRDs | ✅ Validated | `oci://ghcr.io/kagent-dev/kagent/helm/kagent` and CRDs chart |
 | 4 | Copilot Studio is the A2A client/orchestrator | ✅ Validated | Host agent deployed/published via `pac`; the A2A bind itself is a manual maker-portal step |
 | 5 | Local kagent can be exposed to cloud clients | ✅ Validated | Persistent anonymous Dev Tunnel forwards the A2A NodePort over HTTPS |
 | 6 | A2A bind is `pac`-scriptable | ❌ Refuted | `pac` 2.8.1 has no command to bind an A2A agent; the bind (Agents → Add agent → A2A agent) is a one-time **manual** maker-portal step. `pac` only scripts the host-agent + custom connector deploy. |
 | 7 | Host agent must be Published before testing | ✅ Validated | Unpublished agent throws `SystemError`; `60-copilot-deploy.sh` publishes |
 | 8 | Copilot Studio accepts the kagent agent card | ⚠️ Conditional | Only the **v0.3** card is accepted; kagent ≥ 0.9.7 emits a v1 `supportedInterfaces` entry that "Add agent → A2A agent" rejects. `40-kagent-install.sh` pins `KAGENT_VERSION=0.9.6` (last pure-v0.3 card) |
+
+> **Version-locked assumptions:** #6 and #8 were validated against `pac` 2.8.1 and kagent 0.9.6. Re-verify before upgrading either — a newer `pac` may script the A2A bind (#6), and a newer Copilot Studio may accept kagent ≥ 0.9.7's v1 agent card (#8).
 
 ## Environment Decisions
 
@@ -58,7 +60,7 @@ flowchart LR
 
 ## Implementation Tasks
 
-1. [x] **scaffold** — established the `kagent-copilot` project layout (cluster, env vars, docs) with stable `AGENT_NAME` and namespaces.
+1. [x] **scaffold** — established the `kagent-copilot` project layout (cluster, env vars, docs) with a stable `AGENT_NAME` and namespace.
 2. [x] **dev-tunnel** — `25-devtunnel-up.sh`: persistent anonymous Dev Tunnel, port forward, URL resolution into `TUNNEL_URL`; tools/preflight extended for `devtunnel`/`pac`.
 3. [x] **kagent wiring** — `40-kagent-install.sh` advertises the tunnel URL as `controller.a2aBaseUrl`; `55-verify-a2a.sh` checks the public tunnel path.
 4. [x] **copilot-deploy** — `60-copilot-deploy.sh` deploys + publishes the host agent and A2A connector via `pac`; `copilot/` holds the committed templates.
