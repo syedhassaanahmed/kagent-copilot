@@ -26,7 +26,7 @@ fi
 [ -n "$PAC_ENVIRONMENT_URL" ] || die "PAC_ENVIRONMENT_URL is empty and no active pac profile found — set it in .env (see 'pac org list') or run 'pac auth create --url <env-url>'"
 [ -n "$TUNNEL_URL" ] || die "TUNNEL_URL is empty — run 25-devtunnel-up.sh first (need the public tunnel host for the connector)"
 
-AGENT_NAMESPACE="$(kagent_namespace)"
+NS="$(kagent_namespace)"
 AGENT_NAME="${AGENT_NAME:-a2a-demo-agent}"
 COPILOT_AGENT_DISPLAY_NAME="${COPILOT_AGENT_DISPLAY_NAME:-kagent A2A Host}"
 COPILOT_AGENT_SCHEMA_NAME="${COPILOT_AGENT_SCHEMA_NAME:-kagent_a2a_host}"
@@ -38,7 +38,7 @@ TUNNEL_BASE="${TUNNEL_URL%/}"
 TUNNEL_HOST="${TUNNEL_BASE#http://}"
 TUNNEL_HOST="${TUNNEL_HOST#https://}"
 TUNNEL_HOST="${TUNNEL_HOST%%/*}"
-A2A_ENDPOINT="${TUNNEL_BASE}/api/a2a/${AGENT_NAMESPACE}/${AGENT_NAME}"
+A2A_ENDPOINT="${TUNNEL_BASE}/api/a2a/${NS}/${AGENT_NAME}"
 [ -n "$TUNNEL_HOST" ] || die "could not derive TUNNEL_HOST from TUNNEL_URL='${TUNNEL_URL}'"
 
 sed_escape() {
@@ -72,7 +72,7 @@ render_connector() {
   api_def="$REPO_ROOT/.run/connector/apiDefinition.json"
   api_props="$REPO_ROOT/.run/connector/apiProperties.json"
   host="$(sed_escape "$TUNNEL_HOST")"
-  ns="$(sed_escape "$AGENT_NAMESPACE")"
+  ns="$(sed_escape "$NS")"
   agent="$(sed_escape "$AGENT_NAME")"
 
   mkdir -p "$REPO_ROOT/.run/connector"
@@ -83,7 +83,7 @@ render_connector() {
       -e "s|__A2A_AGENT__|${agent}|g" \
       "$REPO_ROOT/copilot/connector/apiDefinition.json" > "$api_def"
 
-  ok "rendered connector host=${TUNNEL_HOST} path=/api/a2a/${AGENT_NAMESPACE}/${AGENT_NAME}"
+  ok "rendered connector host=${TUNNEL_HOST} path=/api/a2a/${NS}/${AGENT_NAME}"
 }
 
 upsert_connector() {

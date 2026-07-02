@@ -3,7 +3,7 @@
 #
 # The script scripts/50-kagent-agent-apply.sh applies this with metadata.name /
 # namespace and spec.declarative.modelConfig substituted from .env
-# (AGENT_NAME, AGENT_NAMESPACE, MODELCONFIG_NAME).
+# (AGENT_NAME, NAMESPACE, MODELCONFIG_NAME).
 #
 # A deliberately tool-less, conversational agent: it just answers over A2A,
 # which is the most reliable way to prove A2A communication (Microsoft Copilot
@@ -15,7 +15,7 @@ apiVersion: kagent.dev/v1alpha2
 kind: Agent
 metadata:
   name: ${AGENT_NAME}
-  namespace: ${AGENT_NAMESPACE}
+  namespace: ${NAMESPACE}
 spec:
   description: >-
     Friendly kagent demo agent reachable over the A2A (Agent-to-Agent) protocol.

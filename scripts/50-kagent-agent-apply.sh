@@ -99,7 +99,7 @@ ok "ModelConfig applied"
 # --- render Agent from kagent/agent.yaml ---------------------------------
 log "applying Agent '${AGENT}' in namespace '${NS}'..."
 sed -e "s|\${AGENT_NAME}|${AGENT}|g" \
-    -e "s|\${AGENT_NAMESPACE}|${NS}|g" \
+    -e "s|\${NAMESPACE}|${NS}|g" \
     -e "s|\${MODELCONFIG_NAME}|${MODELCONFIG_NAME}|g" \
     "$REPO_ROOT/kagent/agent.yaml" | $K apply -f -
 ok "Agent applied"

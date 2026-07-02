@@ -195,11 +195,10 @@ require_cmd() {
 }
 
 # kagent_namespace — the single Kubernetes namespace that hosts kagent AND the
-# demo Agent. KAGENT_NAMESPACE is canonical; AGENT_NAMESPACE is accepted as a
-# legacy alias for existing .env files. Every script resolves the namespace
-# through this helper so the two can never drift apart.
+# demo Agent. KAGENT_NAMESPACE is the one knob; every script resolves the
+# namespace through this helper so there is exactly one source of truth.
 kagent_namespace() {
-  printf '%s' "${KAGENT_NAMESPACE:-${AGENT_NAMESPACE:-kagent}}"
+  printf '%s' "${KAGENT_NAMESPACE:-kagent}"
 }
 
 # http_code URL [extra curl args...] — echo the HTTP status of a request to URL
