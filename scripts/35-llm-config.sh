@@ -17,8 +17,9 @@
 # Docker Desktop + WSL2 note: the pod->host path goes through the Windows host
 # loopback, which the WSL2 NAT-mode mirror forwards to WSL ONLY for IPv4 sockets.
 # Stock Ollama binds dual-stack [::] (even with OLLAMA_HOST=0.0.0.0), which
-# IPv4-only Kind pods cannot reach. 20-ollama-up.sh binds Ollama to IPv4
-# (OLLAMA_HOST=127.0.0.1:PORT via a systemd drop-in). See docs/troubleshooting.md.
+# IPv4-only Kind pods cannot reach. 20-ollama-up.sh binds a freshly-started Ollama
+# to IPv4; a pre-existing dual-stack server is diagnosed here (the pod probe below
+# is the authority) with a printed one-time fix. See docs/troubleshooting.md.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -66,28 +67,18 @@ kind_gateway_ipv4() {
     | grep -E '^[0-9]+\.' | head -1
 }
 
-# ensure_model_on_local_ollama — make sure LLM_MODEL exists on the LOCAL Ollama
-# (http://127.0.0.1:PORT). The pull is driven against localhost so the model is
-# always stored in the WSL Ollama, never a remote/foreign one.
-ensure_model_on_local_ollama() {
-  local host="http://127.0.0.1:${PORT}" model="${LLM_MODEL:-qwen2.5:1.5b}"
-  curl -fsS --max-time 5 "${host}/api/tags" >/dev/null 2>&1 \
-    || die "no local Ollama answering on ${host}. Start it (systemd: 'systemctl start ollama', or 'make ollama')."
-  if curl -s --max-time 10 "${host}/api/tags" | grep -q "\"model\":\"${model}\""; then
-    ok "model '${model}' already present on local Ollama"
-    return 0
-  fi
-  log "pulling model '${model}' onto local Ollama (${host}) — one-time..."
-  curl -s --max-time 3600 -X POST "${host}/api/pull" -d "{\"model\":\"${model}\"}" >/dev/null \
-    || die "failed to pull '${model}' onto local Ollama"
-  curl -s --max-time 10 "${host}/api/tags" | grep -q "\"model\":\"${model}\"" \
-    || die "model '${model}' still missing after pull"
-  ok "model '${model}' pulled onto local Ollama"
+# require_local_ollama — verify a local Ollama is answering on 127.0.0.1:PORT.
+# The model itself is pulled by 20-ollama-up.sh ('make ollama'), which owns the
+# Ollama lifecycle; here we only need a reachable server to derive and verify the
+# pod-facing endpoint below.
+require_local_ollama() {
+  curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/tags" >/dev/null 2>&1 \
+    || die "no local Ollama answering on http://127.0.0.1:${PORT}. Start it with 'make ollama' (it also pulls ${LLM_MODEL:-qwen2.5:1.5b})."
 }
 
 resolve_ollama() {
-  # 1. The demo model lives on the LOCAL WSL Ollama.
-  ensure_model_on_local_ollama
+  # 1. A local Ollama must be up (20-ollama-up.sh started it and pulled the model).
+  require_local_ollama
 
   # 2. Resolve the pod-reachable host endpoint that routes to that Ollama.
   if [ -n "${LLM_ENDPOINT:-}" ]; then

@@ -214,8 +214,8 @@ http_code() {
 
 # print_ipv4_fix_hint [port] — explain (to stderr) why a dual-stack/IPv6 Ollama is
 # unreachable from IPv4-only Kind pods on Docker Desktop + WSL2, and print the
-# one-time systemd drop-in that binds Ollama to IPv4. Shared by 20-ollama-up.sh
-# and 35-llm-config.sh so the recipe lives in exactly one place.
+# one-time systemd drop-in that binds Ollama to IPv4. Used by 35-llm-config.sh
+# when a pod cannot reach the host Ollama.
 print_ipv4_fix_hint() {
   local port="${1:-${OLLAMA_PORT:-11434}}"
   local dropdir=/etc/systemd/system/ollama.service.d

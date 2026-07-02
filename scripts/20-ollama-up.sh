@@ -1,21 +1,18 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# 20-ollama-up.sh — ensure a host Ollama server reachable from Kind pods, with
-# the demo model pulled. Runs only when LLM_PROVIDER=ollama; no-op otherwise.
-#
-# Idempotent:
+# 20-ollama-up.sh — start the host Ollama server and pull the demo model.
+# Runs only when LLM_PROVIDER=ollama; no-op otherwise. Idempotent:
 #   - reuses an already-running server if one answers on $OLLAMA_PORT
 #   - otherwise starts one bound to 127.0.0.1:$OLLAMA_PORT (log in .ollama.log)
-#   - ensures an IPv4 listener (see below), pulling LLM_MODEL only if missing
+#   - pulls LLM_MODEL only if missing
 #
-# Why IPv4 (Docker Desktop + WSL2):
-#   IPv4-only Kind pods reach the WSL host through the Windows loopback, which the
-#   WSL2 NAT-mode mirror forwards ONLY for IPv4 sockets. Stock Ollama binds
-#   dual-stack [::] (shown by `ss` as `*:11434`) even with OLLAMA_HOST=0.0.0.0,
-#   which that mirror skips. Binding 127.0.0.1 yields a true IPv4 socket the mirror
-#   forwards. For a systemd-managed Ollama this is applied via a drop-in setting
-#   OLLAMA_HOST=127.0.0.1:$OLLAMA_PORT (sudo may prompt). A no-Ollama-change
-#   alternative is WSL mirrored networking. See docs/troubleshooting.md.
+# Binding 127.0.0.1 gives a true IPv4 socket, which matters on Docker Desktop +
+# WSL2: IPv4-only Kind pods reach the WSL host through the Windows loopback, which
+# the WSL2 NAT-mode mirror forwards ONLY for IPv4 sockets (stock Ollama otherwise
+# binds dual-stack [::], which pods cannot reach). Whether a pod can actually
+# reach this server is verified authoritatively by 35-llm-config.sh, which prints
+# the one-time IPv4 fix if a pre-existing server is bound dual-stack.
+# See docs/troubleshooting.md.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
@@ -33,73 +30,12 @@ MODEL="${LLM_MODEL:-qwen2.5:1.5b}"
 
 api_up() { curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/tags" >/dev/null 2>&1; }
 
-# has_ipv4_listener — true only for an explicit IPv4 listener (0.0.0.0 / 127.0.0.1)
-# on $PORT. Dual-stack/IPv6 (* / [::]) does NOT count.
-has_ipv4_listener() {
-  if have_cmd ss; then
-    ss -ltnH 2>/dev/null | awk '{print $4}' | grep -qE "^(0\.0\.0\.0|127\.0\.0\.1):${PORT}$"
-  elif have_cmd lsof; then
-    lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | grep -qE '(0\.0\.0\.0|127\.0\.0\.1):'"${PORT}"
-  else
-    return 0   # can't tell; assume ok
-  fi
-}
-
-# run_sudo — run a privileged command, preferring non-interactive sudo, falling
-# back to an interactive prompt when attached to a TTY (e.g. user runs `make up`).
-run_sudo() {
-  if sudo -n true 2>/dev/null; then
-    sudo -n "$@"
-  elif [ -t 0 ] || [ -t 1 ]; then
-    sudo "$@"
-  else
-    return 1
-  fi
-}
-
-systemd_ollama() { systemctl list-unit-files 2>/dev/null | grep -qE '^ollama\.service'; }
-
-# apply_ipv4_dropin — set OLLAMA_HOST=127.0.0.1:$PORT on the systemd Ollama via a
-# drop-in and restart it. The drop-in is named to sort LAST (systemd merges *.d
-# files alphabetically, last assignment of a variable wins) so it overrides any
-# pre-existing override.conf that sets OLLAMA_HOST=0.0.0.0. Returns 0 only if an
-# IPv4 listener results.
-apply_ipv4_dropin() {
-  local dropdir=/etc/systemd/system/ollama.service.d
-  ( sudo -n true 2>/dev/null || [ -t 0 ] || [ -t 1 ] ) || return 1
-  log "applying systemd drop-in OLLAMA_HOST=127.0.0.1:${PORT} (sudo may prompt)..."
-  run_sudo mkdir -p "$dropdir" || return 1
-  run_sudo rm -f "$dropdir/ipv4.conf" 2>/dev/null || true   # remove stale early-sorting drop-in
-  printf '[Service]\nEnvironment="OLLAMA_HOST=127.0.0.1:%s"\n' "$PORT" \
-    | run_sudo tee "$dropdir/zz-ipv4.conf" >/dev/null || return 1
-  run_sudo systemctl daemon-reload || return 1
-  run_sudo systemctl restart ollama || return 1
-  sleep 3
-  has_ipv4_listener
-}
-
-instruct_ipv4_and_die() {
-  print_ipv4_fix_hint "$PORT"
-  die "Ollama on :${PORT} is not reachable from IPv4-only Kind pods (apply the IPv4 fix above, then re-run 'make up')."
-}
-
-ensure_ipv4() {
-  has_ipv4_listener && { ok "Ollama has an IPv4 listener on :${PORT} (pod-reachable)"; return 0; }
-  warn "Ollama on :${PORT} is bound dual-stack/IPv6 — IPv4-only Kind pods cannot reach it."
-  if systemd_ollama; then
-    apply_ipv4_dropin && { ok "Ollama rebound to IPv4 127.0.0.1:${PORT}"; return 0; }
-  fi
-  instruct_ipv4_and_die
-}
-
 if api_up; then
   ok "reusing existing Ollama server on :${PORT}"
-  ensure_ipv4
 else
   log "starting 'ollama serve' on 127.0.0.1:${PORT} (IPv4)..."
   OLLAMA_HOST="127.0.0.1:${PORT}" nohup ollama serve >"$REPO_ROOT/.ollama.log" 2>&1 &
   wait_for "ollama API on :${PORT}" 60 bash -c "curl -fsS --max-time 3 http://127.0.0.1:${PORT}/api/tags >/dev/null"
-  ensure_ipv4
 fi
 
 # --- model ----------------------------------------------------------------

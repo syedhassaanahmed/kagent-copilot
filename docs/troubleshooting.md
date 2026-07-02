@@ -28,7 +28,7 @@ The hardest local piece is getting the **kagent pods** to reach the **host's Oll
 
 When Docker runs as **Docker Desktop on Windows with a WSL2 backend**, Kind pods reach the host through the Windows host gateway. WSL2's localhost mirror forwards that loopback to WSL services only for IPv4-bound sockets. Stock Ollama often binds dual-stack IPv6 (`[::]:11434`), which IPv4-only Kind pods cannot reach.
 
-**Fix:** force Ollama onto an explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434`. `make ollama` / `make up` applies the systemd drop-in automatically when needed.
+**Fix:** force Ollama onto an explicit IPv4 socket with `OLLAMA_HOST=127.0.0.1:11434`. `make up` starts a fresh Ollama already bound to IPv4; if you have a pre-existing (systemd) Ollama bound dual-stack, `make up` detects it during `llm-config` and prints the exact one-time drop-in command to apply, then re-run.
 
 To diagnose manually:
 

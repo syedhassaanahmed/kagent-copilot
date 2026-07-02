@@ -1,6 +1,6 @@
 # Implementation Plan: Copilot Studio ⇄ kagent A2A Demo
 
-> **Docker Desktop + WSL2 networking:** the IPv4-only NAT gotcha (stock dual-stack Ollama is unreachable from Kind pods) is resolved by binding Ollama to IPv4 in `20-ollama-up.sh`. See [`docs/troubleshooting.md`](docs/troubleshooting.md) for the full explanation and fix.
+> **Docker Desktop + WSL2 networking:** the IPv4-only NAT gotcha (stock dual-stack Ollama is unreachable from Kind pods) is handled by starting Ollama bound to IPv4 in `20-ollama-up.sh`; `35-llm-config.sh` verifies pod reachability and prints a one-time fix for a pre-existing dual-stack server. See [`docs/troubleshooting.md`](docs/troubleshooting.md) for the full explanation and fix.
 
 ## Problem Statement
 
