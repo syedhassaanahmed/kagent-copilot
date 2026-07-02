@@ -5,9 +5,9 @@
 # The resolved endpoint is written to LLM_ENDPOINT in .env and later injected
 # straight into the kagent ModelConfig (no CoreDNS patching).
 #
-#   LLM_PROVIDER=ollama       -> the demo model is pulled onto the LOCAL (WSL)
-#                                Ollama, then the pod-reachable host endpoint is
-#                                resolved and verified from inside a pod.
+#   LLM_PROVIDER=ollama       -> verify the LOCAL (WSL) Ollama is up (its model is
+#                                pulled by 20-ollama-up.sh), then resolve and verify
+#                                the pod-reachable host endpoint from inside a pod.
 #   LLM_PROVIDER=openai|azure -> use LLM_ENDPOINT as-is; probe egress reachability.
 #
 # Why probe from a pod (not the node)? Pods resolve via CoreDNS, which does not
