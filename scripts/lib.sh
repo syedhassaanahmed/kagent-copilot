@@ -220,6 +220,13 @@ kagent_namespace() {
   printf '%s' "${KAGENT_NAMESPACE:-kagent}"
 }
 
+# a2a_nodeport — the host NodePort that publishes the kagent controller A2A port
+# (8083) to the host. Single source of the default; KAGENT_A2A_NODEPORT (.env)
+# overrides. Must stay within the Kubernetes NodePort range (30000-32767).
+a2a_nodeport() {
+  printf '%s' "${KAGENT_A2A_NODEPORT:-30883}"
+}
+
 # http_code URL [extra curl args...] — echo the HTTP status of a request to URL
 # (000 when unreachable). curl's own '%{http_code}' write-out already yields 000
 # on failure, so no '|| echo 000' doubling is needed. Pass per-call flags such as

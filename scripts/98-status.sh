@@ -12,7 +12,7 @@ CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
-NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
+NODEPORT="$(a2a_nodeport)"
 
 hr() { printf '%s\n' "----------------------------------------------------------------"; }
 

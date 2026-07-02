@@ -20,7 +20,7 @@ CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
 CTX="kind-${CLUSTER}"
 K="kubectl --context ${CTX}"
 NS="$(kagent_namespace)"
-NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
+NODEPORT="$(a2a_nodeport)"
 # Pinned to 0.9.6 — the last kagent release that serves a pure A2A v0.3 agent card.
 # kagent 0.9.7+ (commit "Migrate from A2A v0 to v1") adds a `supportedInterfaces`
 # array with a protocolVersion "1.0" entry to the card. Copilot Studio's A2A bind

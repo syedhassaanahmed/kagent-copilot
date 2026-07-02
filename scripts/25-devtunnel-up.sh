@@ -17,7 +17,7 @@ require_cmd nohup
 
 TUNNEL_NAME="${TUNNEL_NAME:-kagent-copilot-a2a}"
 TUNNEL_ALLOW_ANONYMOUS="${TUNNEL_ALLOW_ANONYMOUS:-true}"
-NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
+NODEPORT="$(a2a_nodeport)"
 NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
 RUNDIR="$REPO_ROOT/.run"

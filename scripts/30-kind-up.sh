@@ -14,7 +14,7 @@ require_cmd kind
 require_cmd kubectl
 
 CLUSTER="${KIND_CLUSTER_NAME:-kagent-copilot}"
-NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
+NODEPORT="$(a2a_nodeport)"
 CFG="$REPO_ROOT/kind/cluster.yaml"
 
 # --- render cluster config (always, to keep it in sync with .env) ---------

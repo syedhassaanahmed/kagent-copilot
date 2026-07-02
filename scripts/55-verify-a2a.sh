@@ -24,7 +24,7 @@ require_cmd python3
 
 NS="$(kagent_namespace)"
 AGENT="${AGENT_NAME:-a2a-demo-agent}"
-NODEPORT="${KAGENT_A2A_NODEPORT:-30883}"
+NODEPORT="$(a2a_nodeport)"
 PROMPT="${1:-In one friendly sentence, introduce yourself and name the protocol we are communicating over.}"
 
 # verify_base <label> <agent-base-url> [extra curl header]
